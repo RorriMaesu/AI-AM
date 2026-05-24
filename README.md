@@ -1,10 +1,15 @@
 # AI-AM
 
 <p align="center">
-  <img src="images/AI_AM_logo.png" alt="AI-AM Logo" width="220" />
+  <img src="images/AI_AM_logo.png" alt="AI-AM Logo" width="200" />
 </p>
 
-[![Buy Me a Coffee](https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png)](https://www.buymeacoffee.com/rorrimaesu)
+<p align="center"><strong>Support AI-AM</strong></p>
+<p align="center">
+  <a href="https://www.buymeacoffee.com/rorrimaesu">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" width="150" />
+  </a>
+</p>
 
 AI-AM is a local-first cognitive agent runtime that simulates a fourfold mind loop (Manas, Chitta, Ahamkara, Buddhi) with persistent memory, autonomous curiosity, optional sandboxed code execution, and a real-time web dashboard.
 
