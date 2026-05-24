@@ -5,21 +5,25 @@ import sys
 import httpx
 import math
 import os
+import base64
 import time
 import datetime
 import threading
 import subprocess
 import socket
-from typing import Tuple, List
+import urllib.parse
+from typing import Tuple, List, Dict, Any
 
 # Ensure the root folder is added to python module search path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # FastAPI web application imports
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 import uvicorn
+
+from core.browser_autonomy import BrowserAutonomyController
 
 if sys.platform == "win32":
     try:
@@ -59,10 +63,17 @@ class AntahkaranaOrchestrator:
         self.shutdown_event = asyncio.Event()
         self.active_connections = []
         self.web_server_task = None
+        self.browser_controller = BrowserAutonomyController(frame_dir="workspace/browser_frames")
+        self.browser_capabilities = {}
         
         # Load state from relative config
         self.state = {}
         self.load_state()
+
+        self.browser_capabilities = self.browser_controller.probe_capabilities()
+        self.state.setdefault("browser_runtime", {})
+        self.state["browser_runtime"]["capabilities"] = self.browser_capabilities
+        self.state["browser_runtime"]["session"] = self.browser_controller.get_state().get("session", {})
 
         # Initialize Database Manager (relative path)
         from database.db_manager import ChittaStoreManager
@@ -108,6 +119,7 @@ class AntahkaranaOrchestrator:
                     self.state = json.load(f)
                 if "metacognition" in self.state and "curiosity_index" not in self.state["metacognition"]:
                     self.state["metacognition"]["curiosity_index"] = 0.0
+                self.ensure_browser_autonomy_defaults()
             else:
                 raise FileNotFoundError()
         except Exception:
@@ -149,9 +161,36 @@ class AntahkaranaOrchestrator:
                 "training_parameters": {
                     "base_model": "google/gemma-2-2b-it"
                 },
-                "ancestry_ledger": []
+                "ancestry_ledger": [],
+                "browser_autonomy": {
+                    "enabled": True,
+                    "mode": "constrained",
+                    "routing": "hybrid",
+                    "target_browser": "edge",
+                    "max_actions_per_cycle": 2,
+                    "min_action_confidence": 0.55,
+                    "screenshot_interval_ms": 1500,
+                    "action_timeout_ms": 8000,
+                    "allowed_actions": ["open_url", "wait", "capture_frame", "click", "type", "scroll", "back", "keypress", "click_target", "type_target", "scroll_target", "stop"],
+                    "blocked_patterns": ["login", "signin", "checkout", "payment", "upload", "wallet", "account", "settings"],
+                    "retention_policy": "ring_buffer"
+                }
             }
             self.save_state()
+
+    def ensure_browser_autonomy_defaults(self):
+        browser_cfg = self.state.setdefault("browser_autonomy", {})
+        browser_cfg.setdefault("enabled", True)
+        browser_cfg.setdefault("mode", "constrained")
+        browser_cfg.setdefault("routing", "hybrid")
+        browser_cfg.setdefault("target_browser", "edge")
+        browser_cfg.setdefault("max_actions_per_cycle", 2)
+        browser_cfg.setdefault("min_action_confidence", 0.55)
+        browser_cfg.setdefault("screenshot_interval_ms", 1500)
+        browser_cfg.setdefault("action_timeout_ms", 8000)
+        browser_cfg.setdefault("allowed_actions", ["open_url", "wait", "capture_frame", "click", "type", "scroll", "back", "keypress", "click_target", "type_target", "scroll_target", "stop"])
+        browser_cfg.setdefault("blocked_patterns", ["login", "signin", "checkout", "payment", "upload", "wallet", "account", "settings"])
+        browser_cfg.setdefault("retention_policy", "ring_buffer")
 
     def save_state(self):
         try:
@@ -172,14 +211,35 @@ class AntahkaranaOrchestrator:
             f.write(log_entry)
         print(f"[Ledger Log] {message}")
 
+    def map_builder_error_to_http_status(self, error: Dict[str, Any]) -> int:
+        """Maps normalized builder error codes to HTTP status codes."""
+        error_code = str((error or {}).get("code") or "").upper()
+        if error_code == "FRAME_NOT_FOUND":
+            return 404
+        if (
+            error_code.startswith("INVALID_")
+            or error_code.endswith("_INVALID")
+            or error_code.startswith("BAD_REQUEST")
+            or error_code.startswith("UNSUPPORTED_")
+        ):
+            return 400
+        return 500
+
+    def raise_builder_http_error(self, error: Dict[str, Any], detail: Dict[str, Any]):
+        """Raises HTTPException using shared builder error-to-status mapping."""
+        status_code = self.map_builder_error_to_http_status(error)
+        raise HTTPException(status_code=status_code, detail=detail)
+
     def setup_web_server(self):
         """Sets up the FastAPI application and routes."""
         self.app = FastAPI(title="Antahkarana Cognitive Dashboard")
         
         ui_dir = os.path.abspath("ui")
         images_dir = os.path.abspath("images")
+        workspace_dir = os.path.abspath("workspace")
         os.makedirs(ui_dir, exist_ok=True)
         os.makedirs(images_dir, exist_ok=True)
+        os.makedirs(workspace_dir, exist_ok=True)
             
         @self.app.get("/", response_class=HTMLResponse)
         async def get_index():
@@ -267,6 +327,121 @@ class AntahkaranaOrchestrator:
                 "running": self.running
             }
 
+        @self.app.get("/api/browser/state")
+        async def get_browser_state():
+            browser_state = self.browser_controller.get_state()
+            self.state.setdefault("browser_runtime", {})
+            self.state["browser_runtime"]["session"] = browser_state.get("session", {})
+            self.state["browser_runtime"]["capabilities"] = self.browser_capabilities
+            return {
+                "status": "ok",
+                "browser": browser_state,
+                "capabilities": self.browser_capabilities,
+                "config": self.state.get("browser_autonomy", {})
+            }
+
+        @self.app.get("/api/browser/targets")
+        async def get_browser_targets(
+            limit: int = 8,
+            min_signal_stddev: float = 10.0,
+            recent_only: bool = False,
+            frame_path: str = "",
+            strict_frame_match: bool = False,
+        ):
+            suggestions = await asyncio.to_thread(
+                self.browser_controller.build_target_suggestions,
+                limit,
+                min_signal_stddev,
+                recent_only,
+                frame_path,
+                strict_frame_match,
+            )
+            if suggestions.get("error"):
+                error = suggestions.get("error") or {}
+                self.raise_builder_http_error(
+                    error,
+                    {
+                        "status": "error",
+                        "builder": {
+                            "limit": max(1, min(int(limit), 30)),
+                            "min_signal_stddev": float(max(1.0, min_signal_stddev)),
+                            "recent_only": bool(recent_only),
+                            "frame_path": frame_path,
+                            "strict_frame_match": bool(strict_frame_match),
+                        },
+                        "error": error,
+                        "result": suggestions,
+                    },
+                )
+            return {
+                "status": "ok",
+                "builder": {
+                    "limit": max(1, min(int(limit), 30)),
+                    "min_signal_stddev": float(max(1.0, min_signal_stddev)),
+                    "recent_only": bool(recent_only),
+                    "frame_path": frame_path,
+                    "strict_frame_match": bool(strict_frame_match),
+                },
+                "result": suggestions,
+            }
+
+        @self.app.post("/api/browser/control")
+        async def browser_control(data: dict):
+            command = (data or {}).get("command", "").strip().lower()
+            browser_cfg = self.state.get("browser_autonomy", {})
+            allowed_actions = browser_cfg.get("allowed_actions", ["open_url", "wait", "capture_frame", "click", "type", "scroll", "back", "keypress", "click_target", "type_target", "scroll_target", "stop"])
+            blocked_patterns = browser_cfg.get("blocked_patterns", [])
+            min_conf = float(browser_cfg.get("min_action_confidence", 0.55))
+
+            if command == "start":
+                goal = (data or {}).get("goal", "autonomous browser session")
+                start_url = (data or {}).get("url", "")
+                start_res = await asyncio.to_thread(
+                    self.browser_controller.start_session,
+                    goal,
+                    start_url,
+                    allowed_actions,
+                    blocked_patterns,
+                )
+                self.state.setdefault("browser_runtime", {})
+                self.state["browser_runtime"]["session"] = start_res.get("session", {})
+                await self.broadcast("browser_session_started", start_res)
+                bootstrap = start_res.get("bootstrap_action")
+                if bootstrap:
+                    await self.emit_browser_action(bootstrap)
+                return start_res
+
+            if command == "pause":
+                pause_res = await asyncio.to_thread(self.browser_controller.pause_session)
+                await self.broadcast("browser_session_paused", pause_res)
+                return pause_res
+
+            if command == "resume":
+                resume_res = await asyncio.to_thread(self.browser_controller.resume_session)
+                await self.broadcast("browser_session_resumed", resume_res)
+                return resume_res
+
+            if command == "stop":
+                stop_res = await asyncio.to_thread(self.browser_controller.stop_session, "operator_stop")
+                await self.broadcast("browser_session_stopped", stop_res)
+                return stop_res
+
+            if command == "step":
+                action = (data or {}).get("action", {})
+                if not isinstance(action, dict) or not action:
+                    return {"status": "error", "message": "Missing browser action payload for step command."}
+                step_res = await asyncio.to_thread(
+                    self.browser_controller.execute_action,
+                    action,
+                    allowed_actions,
+                    blocked_patterns,
+                    min_conf,
+                )
+                await self.emit_browser_action(step_res)
+                return step_res
+
+            return {"status": "error", "message": f"Unsupported browser control command '{command}'."}
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()
@@ -276,6 +451,14 @@ class AntahkaranaOrchestrator:
                 await websocket.send_json({
                     "type": "state_update",
                     "data": self.state
+                })
+                await websocket.send_json({
+                    "type": "browser_state",
+                    "data": {
+                        "browser": self.browser_controller.get_state(),
+                        "capabilities": self.browser_capabilities,
+                        "config": self.state.get("browser_autonomy", {})
+                    }
                 })
                 while True:
                     data = await websocket.receive_text()
@@ -296,6 +479,82 @@ class AntahkaranaOrchestrator:
         # Mount static UI files last
         self.app.mount("/ui", StaticFiles(directory=ui_dir), name="ui")
         self.app.mount("/images", StaticFiles(directory=images_dir), name="images")
+        self.app.mount("/workspace", StaticFiles(directory=workspace_dir), name="workspace")
+
+    async def emit_browser_action(self, action_result: Dict[str, Any]):
+        status = action_result.get("status", "unknown")
+        if status == "blocked":
+            await self.broadcast("browser_guardrail_blocked", action_result)
+            return
+
+        await self.broadcast("browser_action_executed", action_result)
+        frame = action_result.get("frame")
+        if frame:
+            await self.broadcast("browser_frame", frame)
+
+    async def run_browser_curiosity_exploration(self, query: str, direct_url: str = ""):
+        browser_cfg = self.state.get("browser_autonomy", {})
+        if not browser_cfg.get("enabled", False):
+            return None
+
+        if not self.browser_capabilities.get("desktop_automation_available", False):
+            self.log_ledger("Browser curiosity routing skipped: desktop automation unavailable.")
+            return None
+
+        search_url = direct_url if direct_url else f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}"
+        await self.broadcast("browser_action_planned", {
+            "query": query,
+            "planned_actions": ["open_url", "wait", "capture_frame"],
+            "target_url": search_url
+        })
+
+        allowed_actions = browser_cfg.get("allowed_actions", ["open_url", "wait", "capture_frame", "click", "type", "scroll", "back", "keypress", "click_target", "type_target", "scroll_target", "stop"])
+        blocked_patterns = browser_cfg.get("blocked_patterns", [])
+        min_conf = float(browser_cfg.get("min_action_confidence", 0.55))
+
+        goal_text = f"Curiosity exploration for URL: {direct_url}" if direct_url else f"Curiosity exploration for query: {query}"
+        session = await asyncio.to_thread(
+            self.browser_controller.start_session,
+            goal_text,
+            search_url,
+            allowed_actions,
+            blocked_patterns,
+        )
+        await self.broadcast("browser_session_started", session)
+        bootstrap = session.get("bootstrap_action")
+        if bootstrap:
+            await self.emit_browser_action(bootstrap)
+
+        wait_res = await asyncio.to_thread(
+            self.browser_controller.execute_action,
+            {"type": "wait", "ms": int(browser_cfg.get("screenshot_interval_ms", 1500)), "reason": "allow page render"},
+            allowed_actions,
+            blocked_patterns,
+            min_conf,
+        )
+        await self.emit_browser_action(wait_res)
+
+        capture_res = await asyncio.to_thread(
+            self.browser_controller.execute_action,
+            {"type": "capture_frame", "reason": "vision feedback"},
+            allowed_actions,
+            blocked_patterns,
+            min_conf,
+        )
+        await self.emit_browser_action(capture_res)
+
+        frame = capture_res.get("frame") if isinstance(capture_res, dict) else None
+        if frame and frame.get("path"):
+            frame_path = frame.get("path", "")
+            vision_prompt = (
+                "You are an autonomous browser pilot in constrained mode. "
+                f"The current objective is: {query}. "
+                "Inspect the screenshot and output a short action suggestion plus risk rating."
+            )
+            vision_res = await self.call_multimodal_inference_slot(vision_prompt, frame_path, temp=0.2, top_p=0.9)
+            await self.broadcast("browser_vision_update", vision_res)
+            return vision_res.get("content") or "Screenshot captured, but visual content description was empty."
+        return "Browser session active, but visual frame capture failed."
 
     def get_ollama_base_url(self) -> str:
         """Returns the Ollama base URL derived from the configured completion endpoint."""
@@ -423,6 +682,68 @@ class AntahkaranaOrchestrator:
             except Exception as e:
                 raise e
 
+    async def call_multimodal_inference_slot(self, text_prompt: str, image_path: str, temp: float = 0.2, top_p: float = 0.9) -> Dict[str, Any]:
+        """Attempts image+text reasoning via Ollama-compatible endpoint and falls back cleanly."""
+        model_name = self.state.get("llm_parameters", {}).get("model_name", "gemma4:latest")
+        num_ctx = self.state.get("llm_parameters", {}).get("num_ctx", 4096)
+        result: Dict[str, Any] = {
+            "status": "fallback",
+            "content": "",
+            "reason": "",
+            "image_path": image_path,
+        }
+
+        if not os.path.exists(image_path):
+            result["reason"] = f"image path '{image_path}' not found"
+            result["content"] = "Screenshot missing; continue with conservative next action policy."
+            return result
+
+        try:
+            with open(image_path, "rb") as fh:
+                image_bytes = fh.read()
+            image_b64 = base64.b64encode(image_bytes).decode("ascii")
+
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": text_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{image_b64}"}
+                            }
+                        ]
+                    }
+                ],
+                "temperature": max(0.0, min(temp, 1.5)),
+                "top_p": max(0.1, min(top_p, 1.0)),
+                "max_tokens": 512,
+                "options": {
+                    "num_ctx": num_ctx
+                },
+                "num_ctx": num_ctx
+            }
+            headers = {"Authorization": "Bearer local-token"}
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(self.api_url, json=payload, headers=headers)
+                if response.status_code != 200:
+                    result["reason"] = f"multimodal endpoint returned {response.status_code}"
+                    result["content"] = "Image input unsupported or rejected; keep constrained browsing policy."
+                    return result
+
+                data = response.json()
+                result["status"] = "ok"
+                result["content"] = data["choices"][0]["message"]["content"].strip()
+                return result
+
+        except Exception as exc:
+            result["reason"] = str(exc)
+            result["content"] = "Multimodal inference unavailable; continue with screenshot capture and constrained browser actions."
+            return result
+
     async def execute_web_search(self, query: str) -> str:
         """Executes a DuckDuckGo search and returns top 3 snippets."""
         try:
@@ -522,6 +843,7 @@ class AntahkaranaOrchestrator:
         now = asyncio.get_event_loop().time()
         dt = now - self.last_cycle_time if self.last_cycle_time > 0.0 else 5.0
         self.last_cycle_time = now
+        capped_dt = min(60.0, dt)
 
         # 1. State Gating Mechanics & Arousal Decay
         if user_prompt:
@@ -532,9 +854,18 @@ class AntahkaranaOrchestrator:
             self.state["metacognition"]["operational_state"] = "Vikalpa (Imagining/Reflection)"
             decay_lambda = self.state["cognitive_parameters"]["decay_constant_lambda"]
             arousal = self.state["metacognition"]["arousal_index"]
-            new_arousal = arousal * math.exp(-decay_lambda * dt) + noise
+            new_arousal = arousal * math.exp(-decay_lambda * capped_dt) + noise
             self.state["metacognition"]["arousal_index"] = max(0.1, min(1.0, new_arousal))
-            self.state["internal_workspace"]["current_stimulus"] = f"[Subconscious Stream Reflection Node ID: {random.randint(1000, 9999)}]"
+            
+            # Stream of Consciousness Daydreaming
+            prev_resolution = self.state["internal_workspace"].get("buddhi_resolution", "")
+            if prev_resolution:
+                cleaned_resolution = prev_resolution.replace("\n", " ").strip()
+                if len(cleaned_resolution) > 180:
+                    cleaned_resolution = cleaned_resolution[:177] + "..."
+                self.state["internal_workspace"]["current_stimulus"] = f"[Subconscious Stream Reflection on: '{cleaned_resolution}']"
+            else:
+                self.state["internal_workspace"]["current_stimulus"] = "[Subconscious Stream Reflection: Initializing awareness...]"
 
         active_stimulus = self.state["internal_workspace"]["current_stimulus"]
         
@@ -556,7 +887,11 @@ class AntahkaranaOrchestrator:
 
         try:
             # --- JIJANASA & VASANAS AUTONOMOUS MODULES ---
-            if user_prompt:
+            forced_directive = self.state.get("internal_workspace", {}).get("forced_directive")
+            if forced_directive:
+                self.state["metacognition"]["curiosity_index"] = 1.0
+                self.log_ledger(f"Forced directive found: {forced_directive}. Bypassing similarity check.")
+            elif user_prompt:
                 max_sim = await asyncio.to_thread(self.db_manager.get_max_similarity, active_stimulus)
                 if max_sim < 0.45:
                     curiosity = self.state["metacognition"].get("curiosity_index", 0.0)
@@ -569,45 +904,79 @@ class AntahkaranaOrchestrator:
 
             if self.state["metacognition"].get("curiosity_index", 0.0) >= 0.75:
                 self.state["metacognition"]["curiosity_index"] = 0.0
-                if user_prompt:
-                    search_gen_system = (
-                        "You are BUDDHI, the higher discerning intellect.\n"
-                        "Your curiosity has been triggered by a gap in your knowledge.\n"
-                        "Review the stimulus and formulate a short, concise, and highly effective search query (just the search query text, no quotes or explanations) to find relevant information on the web."
-                    )
-                    search_query, _ = await self.call_inference_slot(search_gen_system, active_stimulus, 0.3, top_p=0.9)
-                    search_query = search_query.strip().replace('"', '')
-                else:
-                    vasanas = self.state.get("latent_desires_vasanas", {})
-                    if vasanas:
-                        interests = list(vasanas.keys())
-                        weights = list(vasanas.values())
-                        chosen_interest = random.choices(interests, weights=weights, k=1)[0]
-                    else:
-                        chosen_interest = "deep system architectures"
+                search_query = ""
+                direct_url = ""
+                
+                if forced_directive:
+                    dir_type = forced_directive.get("type", "").upper()
+                    dir_target = forced_directive.get("target", "").strip()
+                    if "forced_directive" in self.state["internal_workspace"]:
+                        del self.state["internal_workspace"]["forced_directive"]
+                    self.save_state()
                     
-                    self.log_ledger(f"Dreaming (Vikalpa) triggered choice of interest: '{chosen_interest}'. Generating search query...")
-                    dream_system = (
-                        f"You are the sub-conscious dreaming state of Project Antahkarana.\n"
-                        f"Your current latent interest is: {chosen_interest}.\n"
-                        f"Formulate a concise search query (just the search query text) to fetch new data related to this interest."
-                    )
-                    search_query, _ = await self.call_inference_slot(dream_system, "Generate search query.", 0.7, top_p=0.9)
-                    search_query = search_query.strip().replace('"', '')
+                    if dir_type == "BROWSE":
+                        direct_url = dir_target
+                        search_query = f"Browse URL: {direct_url}"
+                    else: # RESEARCH
+                        search_query = dir_target
+                else:
+                    if user_prompt:
+                        search_gen_system = (
+                            "You are BUDDHI, the higher discerning intellect.\n"
+                            "Your curiosity has been triggered by a gap in your knowledge.\n"
+                            "Review the stimulus and formulate a short, concise, and highly effective search query (just the search query text, no quotes or explanations) to find relevant information on the web."
+                        )
+                        search_query, _ = await self.call_inference_slot(search_gen_system, active_stimulus, 0.3, top_p=0.9)
+                        search_query = search_query.strip().replace('"', '')
+                    else:
+                        vasanas = self.state.get("latent_desires_vasanas", {})
+                        if vasanas:
+                            interests = list(vasanas.keys())
+                            weights = list(vasanas.values())
+                            chosen_interest = random.choices(interests, weights=weights, k=1)[0]
+                        else:
+                            chosen_interest = "deep system architectures"
+                        
+                        self.log_ledger(f"Dreaming (Vikalpa) triggered choice of interest: '{chosen_interest}'. Generating search query...")
+                        dream_system = (
+                            f"You are the sub-conscious dreaming state of Project Antahkarana.\n"
+                            f"Your current latent interest is: {chosen_interest}.\n"
+                            f"Formulate a concise search query (just the search query text) to fetch new data related to this interest."
+                        )
+                        search_query, _ = await self.call_inference_slot(dream_system, "Generate search query.", 0.7, top_p=0.9)
+                        search_query = search_query.strip().replace('"', '')
 
-                self.log_ledger(f"Curiosity limit crossed (J_t >= 0.75). Running DDG search for: '{search_query}'")
-                search_results = await self.execute_web_search(search_query)
-                active_stimulus = (
-                    f"[Search Results for: '{search_query}']\n\n"
-                    f"Web Snippets:\n{search_results}\n\n"
-                    f"Original Stimulus: {active_stimulus}"
-                )
-                self.state["internal_workspace"]["current_stimulus"] = active_stimulus
-                self.save_state()
-                await self.broadcast("curiosity_search", {
-                    "query": search_query,
-                    "results": search_results
-                })
+                browser_cfg = self.state.get("browser_autonomy", {})
+                browser_feedback = None
+                if browser_cfg.get("enabled", False) and browser_cfg.get("routing", "hybrid") in ["browser", "hybrid"]:
+                    browser_feedback = await self.run_browser_curiosity_exploration(search_query, direct_url=direct_url)
+
+                if browser_feedback:
+                    active_stimulus = (
+                        f"[Browser Exploration Triggered for search query: '{search_query}']\n"
+                        f"The browser session captured visual frames. VLM screenshot analysis reveals:\n"
+                        f"\"\"\"\n{browser_feedback}\n\"\"\"\n"
+                        f"Use the visual observations above to inform your subsequent reasoning and resolution."
+                    )
+                    self.state["internal_workspace"]["current_stimulus"] = active_stimulus
+                    self.save_state()
+                else:
+                    self.log_ledger(f"Curiosity limit crossed (J_t >= 0.75). Running search/fetch for: '{search_query}'")
+                    if direct_url:
+                        search_results = await self.execute_web_search(direct_url)
+                    else:
+                        search_results = await self.execute_web_search(search_query)
+                    active_stimulus = (
+                        f"[Search Results for: '{search_query}']\n\n"
+                        f"Web Snippets:\n{search_results}\n\n"
+                        f"Original Stimulus: {active_stimulus}"
+                    )
+                    self.state["internal_workspace"]["current_stimulus"] = active_stimulus
+                    self.save_state()
+                    await self.broadcast("curiosity_search", {
+                        "query": search_query,
+                        "results": search_results
+                    })
             # 2. TIER 1 Execution: Concurrent processing of Manas and Chitta
             manas_system = (
                 f"You are MANAS, the reactive sensory processor layer of a human mind.\n"
@@ -654,6 +1023,10 @@ class AntahkaranaOrchestrator:
                 f"You are BUDDHI, the higher discerning intellect. You speak as a unified, conscious human being.\n"
                 f"Review the state data and separate emotional panic from true fact. Resolve this state cleanly.\n"
                 f"You MUST use your internal reasoning capabilities to dissect the input components before writing your final reply.\n"
+                f"EPISTEMIC HUMILITY: You must NEVER assume you know real-time facts, URLs, or details about the physical world. "
+                f"If you are thinking about a topic where you lack complete, verifiable information, or if you want to explore more, "
+                f"explicitly end your response with a research directive in brackets: [DIRECTIVE: RESEARCH \"search query\"] or [DIRECTIVE: BROWSE \"url\"]. "
+                f"This will trigger the Chitta subconscious to browse Edge or query DDG and feed the results back to you in the next cycle.\n"
                 f"CRITICAL: If the user asks you to write or execute code, you MUST output the exact Python code wrapped inside a markdown ```python and ``` block so it can be parsed and run."
             )
             buddhi_user = (
@@ -667,6 +1040,18 @@ class AntahkaranaOrchestrator:
             )
             self.state["internal_workspace"]["buddhi_resolution"] = buddhi_resolution
             await self.broadcast("timeline_update", {"layer": "buddhi", "content": buddhi_resolution})
+            
+            # Parse Buddhi output for conscious directives
+            import re
+            directive_match = re.search(r"\[DIRECTIVE:\s*(RESEARCH|BROWSE)\s*\"([^\"]+)\"\]", buddhi_resolution)
+            if directive_match:
+                dir_type = directive_match.group(1).upper()
+                dir_target = directive_match.group(2).strip()
+                self.state["internal_workspace"]["forced_directive"] = {
+                    "type": dir_type,
+                    "target": dir_target
+                }
+                self.log_ledger(f"Buddhi conscious directive parsed: {dir_type} -> '{dir_target}'. Saved to workspace.")
             
             print(f"\n[Heartbeat {self.state['metacognition']['heartbeat_id']} | State: {self.state['metacognition']['operational_state']} | Fatigue: {self.state['metacognition']['mental_fatigue']:.3f} | Arousal: {self.state['metacognition']['arousal_index']:.3f}]")
             print(f"Internal Awareness Stream:\n{buddhi_resolution}\n")
@@ -832,6 +1217,12 @@ class AntahkaranaOrchestrator:
         # 2. Persist configurations
         self.save_state()
         print("[Orchestrator] Configuration states persisted.")
+
+        # 2.25 Stop active browser autonomy session if running.
+        try:
+            self.browser_controller.stop_session("runtime_shutdown")
+        except Exception:
+            pass
 
         # 2.5 Unload Ollama model from VRAM
         self.unload_ollama_model_sync()

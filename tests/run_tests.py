@@ -251,7 +251,7 @@ async def main():
         curiosity_1 = orchestrator.state["metacognition"]["curiosity_index"]
         print(f"Curiosity Index after novel thought: {curiosity_1:.4f}")
         current_stim = orchestrator.state["internal_workspace"]["current_stimulus"]
-        assert curiosity_1 > 0.0 or "[Search Results for:" in current_stim, "Curiosity index did not rise and no search was triggered on novel thought!"
+        assert curiosity_1 > 0.0 or "[Search Results for:" in current_stim or "[Browser Exploration Triggered" in current_stim, "Curiosity index did not rise and no search was triggered on novel thought!"
         
         # Now test Vikalpa dreaming mode and curiosity drift
         print("Switching system to Vikalpa dreaming mode (no user prompt)...")
@@ -272,7 +272,7 @@ async def main():
         # Verify that current stimulus contains search results
         current_stim = orchestrator.state["internal_workspace"]["current_stimulus"]
         print("Dream Stimulus containing Web Snippets:", repr(current_stim[:150]) + "...")
-        assert "[Search Results for:" in current_stim, "Search results were not injected into dreaming stimulus!"
+        assert "[Search Results for:" in current_stim or "[Browser Exploration Triggered" in current_stim, "Search results were not injected into dreaming stimulus!"
 
         # TEST 6: Karmendriya Sandbox Execution
         print("\n--- TEST 6: Karmendriya Sandbox Execution ---")

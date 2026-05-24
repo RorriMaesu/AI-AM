@@ -33,10 +33,279 @@ const buddhiSlot = document.getElementById('telemetry-buddhi');
 const sandboxConsole = document.getElementById('sandbox-console');
 const ledgerLogs = document.getElementById('ledger-logs');
 
+const browserFrame = document.getElementById('browser-frame');
+const browserFrameEmpty = document.getElementById('browser-frame-empty');
+const browserSessionStatus = document.getElementById('browser-session-status');
+const browserCurrentUrl = document.getElementById('browser-current-url');
+const browserActionLog = document.getElementById('browser-action-log');
+const browserGoalInput = document.getElementById('browser-goal-input');
+const browserUrlInput = document.getElementById('browser-url-input');
+const browserStartBtn = document.getElementById('browser-start-btn');
+const browserPauseBtn = document.getElementById('browser-pause-btn');
+const browserResumeBtn = document.getElementById('browser-resume-btn');
+const browserStopBtn = document.getElementById('browser-stop-btn');
+const layoutExpandAllBtn = document.getElementById('layout-expand-all-btn');
+const layoutCollapseAllBtn = document.getElementById('layout-collapse-all-btn');
+const layoutResetBtn = document.getElementById('layout-reset-btn');
+
+const PANEL_STATE_STORAGE_KEY = 'aiam.dashboard.panelState.v1';
+const PANEL_STACKED_MEDIA_QUERY = '(max-width: 1200px)';
+const DEFAULT_OPEN_BY_COLUMN = {
+    left: 'chat',
+    right: 'telemetry',
+};
+
 let knownModels = [];
 let activeModel = null;
 let shutdownRequested = false;
 let shutdownInFlight = false;
+let panelCollapseState = {};
+
+function getAllCollapsiblePanels() {
+    return Array.from(document.querySelectorAll('.collapsible-panel'));
+}
+
+function isStackedPanelMode() {
+    return window.matchMedia(PANEL_STACKED_MEDIA_QUERY).matches;
+}
+
+function readPanelCollapseState() {
+    try {
+        const raw = window.localStorage.getItem(PANEL_STATE_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_err) {
+        return {};
+    }
+}
+
+function writePanelCollapseState() {
+    try {
+        window.localStorage.setItem(PANEL_STATE_STORAGE_KEY, JSON.stringify(panelCollapseState));
+    } catch (_err) {
+        // Intentionally ignore storage failures to keep runtime UI responsive.
+    }
+}
+
+function refreshPanelSurface(panel) {
+    const panelKey = panel?.dataset?.panelKey || '';
+    if (panelKey === 'graph' && network) {
+        setTimeout(() => {
+            try {
+                network.fit({ animation: { duration: 160 } });
+            } catch (_err) {
+                // Ignore graph refresh failures if graph is not initialized yet.
+            }
+        }, 140);
+    }
+}
+
+function applyPanelCollapsedState(panel, isCollapsed, shouldPersist = true) {
+    const key = panel.dataset.panelKey || '';
+    const toggleBtn = panel.querySelector('.panel-toggle-btn');
+    const title = panel.querySelector('.panel-header h2')?.textContent?.trim() || 'panel';
+    const bodyId = toggleBtn?.getAttribute('aria-controls') || '';
+    const body = bodyId ? document.getElementById(bodyId) : null;
+
+    panel.classList.toggle('is-collapsed', isCollapsed);
+
+    if (toggleBtn) {
+        toggleBtn.textContent = isCollapsed ? 'Expand' : 'Collapse';
+        toggleBtn.setAttribute('aria-expanded', String(!isCollapsed));
+        toggleBtn.setAttribute('aria-label', `${isCollapsed ? 'Expand' : 'Collapse'} ${title} panel`);
+    }
+    if (body) {
+        body.setAttribute('aria-hidden', String(isCollapsed));
+    }
+
+    if (shouldPersist && key) {
+        panelCollapseState[key] = isCollapsed;
+    }
+
+    if (!isCollapsed) {
+        refreshPanelSurface(panel);
+    }
+}
+
+function ensureAtLeastOnePanelOpenPerColumn(shouldPersist = true) {
+    const allPanels = getAllCollapsiblePanels();
+    if (isStackedPanelMode()) {
+        const openPanels = allPanels.filter((panel) => !panel.classList.contains('is-collapsed'));
+        if (openPanels.length === 0) {
+            const preferredPanel = allPanels.find((panel) => panel.dataset.panelKey === 'telemetry') || allPanels[0];
+            if (preferredPanel) {
+                applyPanelCollapsedState(preferredPanel, false, shouldPersist);
+            }
+        } else if (openPanels.length > 1) {
+            const preferredOpen = openPanels.find((panel) => panel.dataset.panelKey === 'telemetry') || openPanels[0];
+            allPanels.forEach((panel) => {
+                applyPanelCollapsedState(panel, panel !== preferredOpen, shouldPersist);
+            });
+        }
+        return;
+    }
+
+    const groupedByColumn = allPanels.reduce((acc, panel) => {
+        const column = panel.dataset.column || 'default';
+        if (!acc[column]) {
+            acc[column] = [];
+        }
+        acc[column].push(panel);
+        return acc;
+    }, {});
+
+    Object.entries(groupedByColumn).forEach(([column, panels]) => {
+        const hasOpenPanel = panels.some((panel) => !panel.classList.contains('is-collapsed'));
+        if (hasOpenPanel) {
+            return;
+        }
+        const preferredKey = DEFAULT_OPEN_BY_COLUMN[column] || '';
+        const preferredPanel = panels.find((panel) => panel.dataset.panelKey === preferredKey);
+        applyPanelCollapsedState(preferredPanel || panels[0], false, shouldPersist);
+    });
+}
+
+function recomputePanelLayout() {
+    const allPanels = getAllCollapsiblePanels();
+    const openByColumn = {};
+
+    allPanels.forEach((panel) => {
+        panel.classList.remove('is-solo-open');
+        if (panel.classList.contains('is-collapsed')) {
+            panel.style.removeProperty('--panel-flex-active');
+            return;
+        }
+        const column = panel.dataset.column || 'default';
+        if (!openByColumn[column]) {
+            openByColumn[column] = [];
+        }
+        openByColumn[column].push(panel);
+    });
+
+    Object.values(openByColumn).forEach((panels) => {
+        if (panels.length === 1) {
+            panels[0].classList.add('is-solo-open');
+        }
+        panels.forEach((panel) => {
+            const weight = Number.parseFloat(panel.dataset.weight || '1');
+            const safeWeight = Number.isFinite(weight) ? Math.max(0.2, weight) : 1;
+            panel.style.setProperty('--panel-flex-active', String(safeWeight));
+        });
+    });
+}
+
+function setPanelCollapsed(panel, isCollapsed, shouldPersist = true) {
+    if (!isCollapsed && isStackedPanelMode()) {
+        getAllCollapsiblePanels().forEach((otherPanel) => {
+            if (otherPanel === panel) return;
+            if (otherPanel.classList.contains('is-collapsed')) return;
+            applyPanelCollapsedState(otherPanel, true, shouldPersist);
+        });
+    }
+
+    applyPanelCollapsedState(panel, isCollapsed, shouldPersist);
+    ensureAtLeastOnePanelOpenPerColumn(shouldPersist);
+    if (shouldPersist) {
+        writePanelCollapseState();
+    }
+    recomputePanelLayout();
+}
+
+function setAllPanelsCollapsedState(isCollapsed, forceDefaultRecovery = true) {
+    const allPanels = getAllCollapsiblePanels();
+
+    if (!isCollapsed) {
+        if (isStackedPanelMode()) {
+            const preferredPanel = allPanels.find((panel) => panel.dataset.panelKey === 'telemetry') || allPanels[0];
+            allPanels.forEach((panel) => {
+                applyPanelCollapsedState(panel, panel !== preferredPanel, true);
+            });
+        } else {
+            allPanels.forEach((panel) => {
+                applyPanelCollapsedState(panel, false, true);
+            });
+        }
+    } else {
+        allPanels.forEach((panel) => {
+            applyPanelCollapsedState(panel, true, true);
+        });
+        if (forceDefaultRecovery) {
+            ensureAtLeastOnePanelOpenPerColumn(true);
+        }
+    }
+
+    writePanelCollapseState();
+    recomputePanelLayout();
+}
+
+function resetPanelLayoutDefaults() {
+    getAllCollapsiblePanels().forEach((panel) => {
+        const column = panel.dataset.column || 'default';
+        const panelKey = panel.dataset.panelKey || '';
+        const shouldOpen = DEFAULT_OPEN_BY_COLUMN[column] === panelKey;
+        applyPanelCollapsedState(panel, !shouldOpen, true);
+    });
+    ensureAtLeastOnePanelOpenPerColumn(true);
+    writePanelCollapseState();
+    recomputePanelLayout();
+}
+
+function normalizePanelsForViewport() {
+    ensureAtLeastOnePanelOpenPerColumn(true);
+    writePanelCollapseState();
+    recomputePanelLayout();
+}
+
+function initCollapsiblePanels() {
+    panelCollapseState = readPanelCollapseState();
+    const allPanels = getAllCollapsiblePanels();
+
+    allPanels.forEach((panel) => {
+        const key = panel.dataset.panelKey || '';
+        const toggleBtn = panel.querySelector('.panel-toggle-btn');
+        if (!toggleBtn) {
+            return;
+        }
+
+        const initialCollapsed = Boolean(key && panelCollapseState[key]);
+        applyPanelCollapsedState(panel, initialCollapsed, false);
+
+        toggleBtn.addEventListener('click', () => {
+            const currentlyCollapsed = panel.classList.contains('is-collapsed');
+            setPanelCollapsed(panel, !currentlyCollapsed, true);
+        });
+    });
+
+    if (layoutExpandAllBtn) {
+        layoutExpandAllBtn.addEventListener('click', () => {
+            setAllPanelsCollapsedState(false, false);
+        });
+    }
+
+    if (layoutCollapseAllBtn) {
+        layoutCollapseAllBtn.addEventListener('click', () => {
+            setAllPanelsCollapsedState(true, true);
+        });
+    }
+
+    if (layoutResetBtn) {
+        layoutResetBtn.addEventListener('click', () => {
+            resetPanelLayoutDefaults();
+        });
+    }
+
+    ensureAtLeastOnePanelOpenPerColumn(false);
+    recomputePanelLayout();
+
+    const mediaQueryList = window.matchMedia(PANEL_STACKED_MEDIA_QUERY);
+    if (typeof mediaQueryList.addEventListener === 'function') {
+        mediaQueryList.addEventListener('change', normalizePanelsForViewport);
+    } else if (typeof mediaQueryList.addListener === 'function') {
+        mediaQueryList.addListener(normalizePanelsForViewport);
+    }
+    normalizePanelsForViewport();
+}
 
 function setInteractiveControlsEnabled(isEnabled) {
     if (chatInput) {
@@ -53,6 +322,18 @@ function setInteractiveControlsEnabled(isEnabled) {
     }
     if (runtimeStopBtn) {
         runtimeStopBtn.disabled = !isEnabled || shutdownInFlight;
+    }
+    if (browserStartBtn) {
+        browserStartBtn.disabled = !isEnabled;
+    }
+    if (browserPauseBtn) {
+        browserPauseBtn.disabled = !isEnabled;
+    }
+    if (browserResumeBtn) {
+        browserResumeBtn.disabled = !isEnabled;
+    }
+    if (browserStopBtn) {
+        browserStopBtn.disabled = !isEnabled;
     }
 }
 
@@ -199,6 +480,46 @@ function handleServerEvent(event) {
 
         case 'shutdown_initiated':
             applyShutdownState('Graceful shutdown initiated by runtime controller.');
+            break;
+
+        case 'browser_state':
+            handleBrowserStateSnapshot(data);
+            break;
+
+        case 'browser_session_started':
+            handleBrowserSessionEvent('started', data);
+            break;
+
+        case 'browser_session_paused':
+            handleBrowserSessionEvent('paused', data);
+            break;
+
+        case 'browser_session_resumed':
+            handleBrowserSessionEvent('resumed', data);
+            break;
+
+        case 'browser_session_stopped':
+            handleBrowserSessionEvent('stopped', data);
+            break;
+
+        case 'browser_action_planned':
+            appendBrowserLog(`Planned: ${JSON.stringify(data)}`, 'normal');
+            break;
+
+        case 'browser_action_executed':
+            handleBrowserActionEvent(data);
+            break;
+
+        case 'browser_guardrail_blocked':
+            appendBrowserLog(`Blocked: ${data.reason || 'Guardrail rule hit'}`, 'failover');
+            break;
+
+        case 'browser_frame':
+            renderBrowserFrame(data);
+            break;
+
+        case 'browser_vision_update':
+            appendBrowserLog(`Vision: ${data.content || data.reason || 'no output'}`, data.status === 'ok' ? 'system' : 'failover');
             break;
             
         default:
@@ -550,6 +871,123 @@ function handleSandboxExecution(data) {
     appendLedgerLog('novelty', 'Karmendriya Docker sandbox execution completed.');
 }
 
+function normalizeFramePath(framePath) {
+    if (!framePath) return '';
+    if (framePath.startsWith('/')) return framePath;
+    const idx = framePath.indexOf('workspace/');
+    if (idx >= 0) {
+        return '/' + framePath.substring(idx);
+    }
+    return '/' + framePath;
+}
+
+function renderBrowserFrame(frame) {
+    if (!browserFrame || !frame) return;
+    const normalized = normalizeFramePath(frame.path);
+    if (!normalized) return;
+
+    browserFrame.src = `${normalized}?t=${Date.now()}`;
+    browserFrame.style.display = 'block';
+    if (browserFrameEmpty) {
+        browserFrameEmpty.style.display = 'none';
+    }
+}
+
+function appendBrowserLog(text, category = 'normal') {
+    if (!browserActionLog) return;
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${category}`;
+    const time = new Date().toLocaleTimeString();
+    entry.textContent = `[${time}] ${text}`;
+    browserActionLog.appendChild(entry);
+
+    while (browserActionLog.children.length > 120) {
+        browserActionLog.removeChild(browserActionLog.firstChild);
+    }
+    browserActionLog.scrollTop = browserActionLog.scrollHeight;
+}
+
+function updateBrowserSessionUI(session) {
+    if (!session) return;
+    if (browserSessionStatus) {
+        if (session.active && session.paused) {
+            browserSessionStatus.textContent = 'Paused';
+        } else if (session.active) {
+            browserSessionStatus.textContent = 'Active';
+        } else {
+            browserSessionStatus.textContent = 'Idle';
+        }
+    }
+    if (browserCurrentUrl) {
+        browserCurrentUrl.textContent = session.current_url || 'N/A';
+    }
+}
+
+function handleBrowserStateSnapshot(payload) {
+    if (!payload) return;
+    const browser = payload.browser || {};
+    const session = browser.session || {};
+    updateBrowserSessionUI(session);
+
+    const recentFrames = browser.recent_frames || [];
+    if (recentFrames.length > 0) {
+        renderBrowserFrame(recentFrames[recentFrames.length - 1]);
+    }
+
+    const recentActions = browser.recent_actions || [];
+    if (recentActions.length > 0) {
+        appendBrowserLog(`Loaded ${recentActions.length} prior browser actions.`, 'system');
+    }
+}
+
+function handleBrowserSessionEvent(eventType, payload) {
+    const session = payload?.session || payload?.browser?.session || {};
+    updateBrowserSessionUI(session);
+    appendBrowserLog(`Session ${eventType}.`, 'system');
+}
+
+function handleBrowserActionEvent(payload) {
+    const status = payload?.status || 'unknown';
+    const actionType = payload?.action?.type || 'action';
+    appendBrowserLog(`Action ${actionType} -> ${status}`, status === 'error' ? 'failover' : 'normal');
+
+    if (payload?.frame) {
+        renderBrowserFrame(payload.frame);
+    }
+}
+
+async function sendBrowserCommand(command, body = {}) {
+    try {
+        const response = await fetch('/api/browser/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command, ...body })
+        });
+
+        const payload = await response.json();
+        if (!response.ok || payload?.status === 'error') {
+            throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+        return payload;
+    } catch (error) {
+        appendBrowserLog(`Command '${command}' failed: ${error.message}`, 'failover');
+        return null;
+    }
+}
+
+async function loadBrowserState() {
+    try {
+        const response = await fetch('/api/browser/state');
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+        handleBrowserStateSnapshot(payload);
+    } catch (error) {
+        appendBrowserLog(`Unable to load browser state: ${error.message}`, 'failover');
+    }
+}
+
 // Render Nidra transitions
 function handleNidraStatus(phase, data) {
     if (phase === 'sleep') {
@@ -636,6 +1074,44 @@ if (runtimeStopBtn) {
     });
 }
 
+if (browserStartBtn) {
+    browserStartBtn.addEventListener('click', async () => {
+        const goal = browserGoalInput?.value?.trim() || 'manual browser autonomy session';
+        const url = browserUrlInput?.value?.trim() || '';
+        const payload = await sendBrowserCommand('start', { goal, url });
+        if (payload) {
+            handleBrowserSessionEvent('started', payload);
+        }
+    });
+}
+
+if (browserPauseBtn) {
+    browserPauseBtn.addEventListener('click', async () => {
+        const payload = await sendBrowserCommand('pause');
+        if (payload) {
+            handleBrowserSessionEvent('paused', payload);
+        }
+    });
+}
+
+if (browserResumeBtn) {
+    browserResumeBtn.addEventListener('click', async () => {
+        const payload = await sendBrowserCommand('resume');
+        if (payload) {
+            handleBrowserSessionEvent('resumed', payload);
+        }
+    });
+}
+
+if (browserStopBtn) {
+    browserStopBtn.addEventListener('click', async () => {
+        const payload = await sendBrowserCommand('stop');
+        if (payload) {
+            handleBrowserSessionEvent('stopped', payload);
+        }
+    });
+}
+
 // HTML escaping helper
 function escapeHtml(text) {
     return text
@@ -654,7 +1130,52 @@ function parseMarkdownCode(text) {
     });
 }
 
+// Tab Navigation Management
+function initTabNavigation() {
+    const tabs = document.querySelectorAll('.nav-tab');
+    
+    // Read active tab from localStorage, default to 'overview'
+    const savedTab = localStorage.getItem('aiam.activeTab') || 'overview';
+    
+    // Apply active tab
+    setActiveTab(savedTab);
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const targetTab = tab.dataset.tab;
+            setActiveTab(targetTab);
+        });
+    });
+}
+
+function setActiveTab(tabName) {
+    const tabs = document.querySelectorAll('.nav-tab');
+    const container = document.querySelector('.dashboard-container');
+    if (!container) return;
+    
+    container.setAttribute('data-active-tab', tabName);
+    localStorage.setItem('aiam.activeTab', tabName);
+
+    tabs.forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tabName);
+    });
+
+    // Refresh graph visualizer and trigger fit layout when memory tab is active
+    if (tabName === 'memory' && network) {
+        setTimeout(() => {
+            try {
+                network.fit({ animation: { duration: 250 } });
+            } catch (_err) {
+                // Ignore vis fit exceptions on uninitialized canvas
+            }
+        }, 180);
+    }
+}
+
 // Boot UI
+initTabNavigation();
+initCollapsiblePanels();
 initNetwork();
 loadModelInventory();
+loadBrowserState();
 connectWebSocket();

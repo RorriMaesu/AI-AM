@@ -12,6 +12,8 @@ venv/
 
 # Logs and runtime artifacts
 logs/
+workspace/browser_frames/
+workspace/sandbox_shared/agent_tool.py
 workspace/sandbox_shared/output.txt
 
 # Database runtime files
