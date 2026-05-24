@@ -322,6 +322,17 @@ async def main():
         assert len(res_1[0]) > 0 and len(res_2[0]) > 0, "One of the concurrent slot responses was empty!"
         print("Concurrency safety and VRAM protection validation verified successfully.")
 
+        # TEST 8: UI/API Graceful Shutdown Request Idempotency
+        print("\n--- TEST 8: Graceful Shutdown Request Idempotency ---")
+        first_shutdown = await orchestrator.request_shutdown("test_suite")
+        second_shutdown = await orchestrator.request_shutdown("test_suite_repeat")
+        print(f"First shutdown request accepted: {first_shutdown}")
+        print(f"Second shutdown request accepted: {second_shutdown}")
+        assert first_shutdown is True, "First shutdown request should be accepted."
+        assert second_shutdown is False, "Second shutdown request should be rejected as duplicate."
+        assert orchestrator.running is False, "Shutdown request should set running=False."
+        assert orchestrator.shutdown_event.is_set(), "Shutdown event should be set after shutdown request."
+
         # TEST 4: Graceful Shutdown Lifecycle
         print("\n--- TEST 4: Graceful Shutdown Lifecycle ---")
         orchestrator.shutdown()

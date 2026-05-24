@@ -55,6 +55,8 @@ class AntahkaranaOrchestrator:
         self.last_cycle_time = 0.0
         self.llama_proc = None
         self.running = True
+        self.shutdown_requested = False
+        self.shutdown_event = asyncio.Event()
         self.active_connections = []
         self.web_server_task = None
         
@@ -250,6 +252,21 @@ class AntahkaranaOrchestrator:
                 response["warning"] = unload_error
             return response
 
+        @self.app.post("/api/stop")
+        async def stop_runtime():
+            accepted = await self.request_shutdown("ui_api")
+            if accepted:
+                return {
+                    "status": "accepted",
+                    "message": "Graceful shutdown requested.",
+                    "running": self.running
+                }
+            return {
+                "status": "already_stopping",
+                "message": "Shutdown request already in progress.",
+                "running": self.running
+            }
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()
@@ -334,6 +351,18 @@ class AntahkaranaOrchestrator:
             except Exception:
                 if connection in self.active_connections:
                     self.active_connections.remove(connection)
+
+    async def request_shutdown(self, source: str = "unknown") -> bool:
+        """Requests a graceful shutdown once; returns True only on first request."""
+        if self.shutdown_requested:
+            return False
+
+        self.shutdown_requested = True
+        self.running = False
+        self.shutdown_event.set()
+        self.log_ledger(f"Graceful shutdown requested via source='{source}'.")
+        await self.broadcast("shutdown_initiated", {"source": source})
+        return True
 
     async def fetch_hardware_entropy(self) -> float:
         """Simulates or queries physical micro-variance from GPU telemetry."""
@@ -487,8 +516,7 @@ class AntahkaranaOrchestrator:
 
         # Intercept terminal shutdown commands
         if user_prompt and user_prompt.lower() in ["exit", "shutdown"]:
-            self.log_ledger(f"Terminal Command '{user_prompt}' detected. Shutting down system loop...")
-            self.running = False
+            await self.request_shutdown("terminal_command")
             return
 
         now = asyncio.get_event_loop().time()
@@ -832,6 +860,14 @@ class AntahkaranaOrchestrator:
         # Start Web Server if not in test_mode
         if not self.test_mode:
             try:
+                if is_port_open(8002):
+                    self.log_ledger("FastAPI startup blocked: port 8002 is already in use.")
+                    print("[Orchestrator Error] Port 8002 is already in use. Stop the existing service and retry.")
+                    self.running = False
+                    self.shutdown_requested = True
+                    self.shutdown_event.set()
+                    return
+
                 self.setup_web_server()
                 config = uvicorn.Config(self.app, host="127.0.0.1", port=8002, log_level="warning")
                 server = uvicorn.Server(config)
@@ -859,7 +895,10 @@ class AntahkaranaOrchestrator:
                     if not self.running:
                         break
                     # Ticks run every 5 seconds
-                    await asyncio.sleep(5.0)
+                    try:
+                        await asyncio.wait_for(self.shutdown_event.wait(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        pass
         except asyncio.CancelledError:
             pass
         except KeyboardInterrupt:

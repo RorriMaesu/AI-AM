@@ -17,11 +17,13 @@ const curiosityBar = document.getElementById('curiosity-bar');
 const curiosityVal = document.getElementById('curiosity-val');
 const modelSelect = document.getElementById('model-select');
 const modelApplyBtn = document.getElementById('model-apply-btn');
+const runtimeStopBtn = document.getElementById('runtime-stop-btn');
 const modelStatus = document.getElementById('model-status');
 
 const chatMessages = document.getElementById('chat-messages');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
+const sendBtn = document.getElementById('send-btn');
 
 const manasSlot = document.getElementById('telemetry-manas');
 const chittaSlot = document.getElementById('telemetry-chitta');
@@ -33,6 +35,42 @@ const ledgerLogs = document.getElementById('ledger-logs');
 
 let knownModels = [];
 let activeModel = null;
+let shutdownRequested = false;
+let shutdownInFlight = false;
+
+function setInteractiveControlsEnabled(isEnabled) {
+    if (chatInput) {
+        chatInput.disabled = !isEnabled;
+    }
+    if (sendBtn) {
+        sendBtn.disabled = !isEnabled;
+    }
+    if (modelSelect) {
+        modelSelect.disabled = !isEnabled;
+    }
+    if (modelApplyBtn) {
+        modelApplyBtn.disabled = !isEnabled;
+    }
+    if (runtimeStopBtn) {
+        runtimeStopBtn.disabled = !isEnabled || shutdownInFlight;
+    }
+}
+
+function applyShutdownState(message) {
+    if (shutdownRequested) return;
+
+    shutdownRequested = true;
+    setInteractiveControlsEnabled(false);
+    stateBadge.textContent = 'Shutting Down';
+    stateBadge.className = 'state-badge badge-stopping';
+    appendLedgerLog('system', message || 'Graceful shutdown requested. Stopping runtime loops...');
+
+    const shutdownNotice = document.createElement('div');
+    shutdownNotice.className = 'system-message';
+    shutdownNotice.textContent = 'Shutdown in progress. Runtime controls are disabled.';
+    chatMessages.appendChild(shutdownNotice);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
 
 // Initialize Vis.js Graph visualizer
 function initNetwork() {
@@ -99,6 +137,13 @@ function connectWebSocket() {
 
     socket.onclose = () => {
         statusDot.className = 'status-dot dot-offline';
+        if (shutdownRequested) {
+            appendLedgerLog('system', 'Runtime stopped. WebSocket session closed after shutdown.');
+            stateBadge.textContent = 'Stopped';
+            stateBadge.className = 'state-badge badge-stopping';
+            return;
+        }
+
         appendLedgerLog('failover', 'WebSocket connection closed. Retrying in 3 seconds...');
         setTimeout(connectWebSocket, 3000);
     };
@@ -150,6 +195,10 @@ function handleServerEvent(event) {
             
         case 'nidra_completed':
             handleNidraStatus('wake', data);
+            break;
+
+        case 'shutdown_initiated':
+            applyShutdownState('Graceful shutdown initiated by runtime controller.');
             break;
             
         default:
@@ -238,6 +287,7 @@ async function loadModelInventory() {
 
 async function applySelectedModel() {
     if (!modelSelect || !modelApplyBtn) return;
+    if (shutdownRequested) return;
     const requestedModel = modelSelect.value;
     if (!requestedModel) return;
 
@@ -271,6 +321,28 @@ async function applySelectedModel() {
         appendLedgerLog('failover', `Model switch failed: ${error.message}`);
     } finally {
         modelApplyBtn.disabled = false;
+    }
+}
+
+async function requestRuntimeStop() {
+    if (!runtimeStopBtn || shutdownInFlight || shutdownRequested) return;
+
+    shutdownInFlight = true;
+    runtimeStopBtn.disabled = true;
+    applyShutdownState('Requesting graceful shutdown from dashboard...');
+
+    try {
+        const response = await fetch('/api/stop', { method: 'POST' });
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+
+        appendLedgerLog('system', payload.message || 'Graceful shutdown acknowledged by backend.');
+    } catch (error) {
+        appendLedgerLog('failover', `Shutdown request failed: ${error.message}`);
+    } finally {
+        shutdownInFlight = false;
     }
 }
 
@@ -533,6 +605,11 @@ function appendLedgerLog(category, text) {
 // Form event submissions
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
+    if (shutdownRequested) {
+        appendLedgerLog('system', 'Input is disabled while shutdown is in progress.');
+        return;
+    }
+
     const prompt = chatInput.value.trim();
     if (!prompt) return;
 
@@ -550,6 +627,12 @@ chatForm.addEventListener('submit', (e) => {
 if (modelApplyBtn) {
     modelApplyBtn.addEventListener('click', () => {
         applySelectedModel();
+    });
+}
+
+if (runtimeStopBtn) {
+    runtimeStopBtn.addEventListener('click', () => {
+        requestRuntimeStop();
     });
 }
 

@@ -59,8 +59,10 @@ The system runs against a local Ollama-compatible chat-completions endpoint and 
   - Returns installed Ollama tags and active model.
 - `POST /api/model/select`
   - Validates and switches active model, persists config, attempts unload of previous model.
+- `POST /api/stop`
+  - Requests graceful runtime shutdown from UI/API, triggering the same cleanup lifecycle as terminal `shutdown`.
 - `WebSocket /ws`
-  - Streams `state_update`, `cycle_started`, `timeline_update`, `curiosity_search`, `sandbox_log`, and Nidra events.
+  - Streams `state_update`, `cycle_started`, `timeline_update`, `curiosity_search`, `sandbox_log`, shutdown events, and Nidra events.
 
 ## Requirements
 
@@ -91,6 +93,14 @@ Expected behavior:
 - selected model is validated
 - current model unload is requested
 - new model is persisted to state/config and used for subsequent calls
+
+You can also stop the runtime directly from the UI using the Stop control in the header.
+
+Expected stop behavior:
+- dashboard sends `POST /api/stop`
+- runtime marks shutdown as requested and begins graceful loop termination
+- UI enters a shutting-down state and disables interaction controls
+- WebSocket closes without reconnect retries once shutdown completes
 
 ## Configuration
 
@@ -159,6 +169,9 @@ Logo source:
   - Verify Ollama is running and API base in `llm_parameters.api_url` is correct.
 - If dashboard does not load assets:
   - Ensure FastAPI static mounts are active and restart after static path changes.
+- If startup fails because port 8002 is busy:
+  - `start_mind.ps1` now detects and stops stale orchestrator instances bound to `8002`.
+  - If a non-orchestrator process owns `8002`, startup is aborted with a clear error to avoid unsafe process termination.
 
 ## License
 
