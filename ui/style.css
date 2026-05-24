@@ -862,6 +862,28 @@ h1 .subtitle {
     box-shadow: 0 0 0 1px rgba(6, 182, 212, 0.12);
 }
 
+.browser-mode-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.01);
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    user-select: none;
+}
+
+.browser-mode-toggle input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: #06b6d4;
+}
+
 .browser-buttons {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

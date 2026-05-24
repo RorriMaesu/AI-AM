@@ -41,6 +41,7 @@ const browserCurrentUrl = document.getElementById('browser-current-url');
 const browserActionLog = document.getElementById('browser-action-log');
 const browserGoalInput = document.getElementById('browser-goal-input');
 const browserUrlInput = document.getElementById('browser-url-input');
+const browserEmbeddedToggle = document.getElementById('browser-embedded-toggle');
 const browserStartBtn = document.getElementById('browser-start-btn');
 const browserPauseBtn = document.getElementById('browser-pause-btn');
 const browserResumeBtn = document.getElementById('browser-resume-btn');
@@ -338,6 +339,9 @@ function setInteractiveControlsEnabled(isEnabled) {
     if (browserStopBtn) {
         browserStopBtn.disabled = !isEnabled;
     }
+    if (browserEmbeddedToggle) {
+        browserEmbeddedToggle.disabled = !isEnabled;
+    }
 }
 
 function applyShutdownState(message) {
@@ -523,6 +527,13 @@ function handleServerEvent(event) {
 
         case 'browser_vision_update':
             appendBrowserLog(`Vision: ${data.content || data.reason || 'no output'}`, data.status === 'ok' ? 'system' : 'failover');
+            break;
+
+        case 'browser_mode_changed':
+            if (browserEmbeddedToggle) {
+                browserEmbeddedToggle.checked = Boolean(data?.prefer_embedded_preview);
+            }
+            appendBrowserLog(`Mode changed to ${data?.transport || 'unknown'}.`, 'system');
             break;
             
         default:
@@ -956,7 +967,12 @@ function handleBrowserStateSnapshot(payload) {
     if (!payload) return;
     const browser = payload.browser || {};
     const session = browser.session || {};
+    const browserConfig = payload.config || {};
     updateBrowserSessionUI(session);
+
+    if (browserEmbeddedToggle && typeof browserConfig.prefer_embedded_preview !== 'undefined') {
+        browserEmbeddedToggle.checked = Boolean(browserConfig.prefer_embedded_preview);
+    }
 
     const recentFrames = browser.recent_frames || [];
     if (recentFrames.length > 0) {
@@ -1140,6 +1156,18 @@ if (browserStopBtn) {
         const payload = await sendBrowserCommand('stop');
         if (payload) {
             handleBrowserSessionEvent('stopped', payload);
+        }
+    });
+}
+
+if (browserEmbeddedToggle) {
+    browserEmbeddedToggle.addEventListener('change', async () => {
+        const preferEmbedded = Boolean(browserEmbeddedToggle.checked);
+        const payload = await sendBrowserCommand('set_mode', {
+            prefer_embedded_preview: preferEmbedded
+        });
+        if (payload) {
+            appendBrowserLog(`Transport set to ${payload.transport || (preferEmbedded ? 'embedded-preview' : 'desktop-automation')}.`, 'system');
         }
     });
 }

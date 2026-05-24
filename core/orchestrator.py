@@ -614,6 +614,19 @@ class AntahkaranaOrchestrator:
                 await self.emit_browser_action(step_res)
                 return step_res
 
+            if command == "set_mode":
+                prefer_embedded = bool((data or {}).get("prefer_embedded_preview", True))
+                self.state.setdefault("browser_autonomy", {})["prefer_embedded_preview"] = prefer_embedded
+                self.save_state()
+                mode_payload = {
+                    "status": "ok",
+                    "prefer_embedded_preview": prefer_embedded,
+                    "transport": "embedded-preview" if prefer_embedded else "desktop-automation",
+                }
+                await self.broadcast("browser_mode_changed", mode_payload)
+                await self.broadcast("state_update", self.state)
+                return mode_payload
+
             return {"status": "error", "message": f"Unsupported browser control command '{command}'."}
 
         @self.app.websocket("/ws")
