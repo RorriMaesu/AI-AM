@@ -1,6 +1,8 @@
 # AI-AM
 
-![AI-AM Logo](images/AI_AM_logo.png)
+<p align="center">
+  <img src="images/AI_AM_logo.png" alt="AI-AM Logo" width="220" />
+</p>
 
 [![Buy Me a Coffee](https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png)](https://www.buymeacoffee.com/rorrimaesu)
 
