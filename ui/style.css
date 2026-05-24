@@ -57,20 +57,43 @@ body {
 .header-main {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 16px;
 }
 
-.logo-glow {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background-color: #06b6d4;
-    box-shadow: 0 0 10px #06b6d4, 0 0 20px #06b6d4;
-    animation: logo-pulse 2s infinite ease-in-out;
+.brand-mark {
+    width: 124px;
+    height: 124px;
+    border-radius: 14px;
+    background: linear-gradient(145deg, rgba(6, 182, 212, 0.12), rgba(15, 23, 42, 0.55));
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(6, 182, 212, 0.1) inset;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    animation: logo-badge-pulse 3s infinite ease-in-out;
+    overflow: hidden;
+}
+
+.brand-mark img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 10px;
+    filter: brightness(1.4) contrast(1.25);
+    mix-blend-mode: screen;
+    transform: scale(1.42);
+    transform-origin: center;
+}
+
+.brand-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 h1 {
-    font-size: 1.25rem;
+    font-size: 1.38rem;
     font-weight: 800;
     letter-spacing: 2px;
     color: #f8fafc;
@@ -78,9 +101,16 @@ h1 {
 
 h1 .subtitle {
     font-weight: 300;
-    font-size: 0.95rem;
+    font-size: 1rem;
     color: #94a3b8;
     letter-spacing: 1px;
+}
+
+.brand-caption {
+    font-size: 0.72rem;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #64748b;
 }
 
 /* Metacognitive Metrics Bar */
@@ -108,6 +138,59 @@ h1 .subtitle {
     font-weight: 600;
     font-family: 'JetBrains Mono', monospace;
     text-align: right;
+}
+
+.metric-item-model {
+    min-width: 240px;
+}
+
+.model-controls {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.model-controls select {
+    min-width: 170px;
+    max-width: 240px;
+    height: 30px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #e2e8f0;
+    border-radius: 6px;
+    padding: 0 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+}
+
+.model-controls button {
+    height: 30px;
+    border-radius: 6px;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.model-controls button:hover {
+    background: rgba(16, 185, 129, 0.25);
+    color: #ecfdf5;
+}
+
+.model-controls button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.model-status {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    text-align: left;
 }
 
 /* Status dots & badges */
@@ -550,13 +633,61 @@ h1 .subtitle {
 .log-entry.normal { color: #cbd5e1; }
 
 /* Animations */
-@keyframes logo-pulse {
-    0% { transform: scale(1); box-shadow: 0 0 6px #06b6d4, 0 0 12px #06b6d4; }
-    50% { transform: scale(1.1); box-shadow: 0 0 10px #06b6d4, 0 0 20px #06b6d4; }
-    100% { transform: scale(1); box-shadow: 0 0 6px #06b6d4, 0 0 12px #06b6d4; }
+@keyframes logo-badge-pulse {
+    0% {
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(6, 182, 212, 0.1) inset;
+    }
+    50% {
+        box-shadow: 0 10px 22px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(6, 182, 212, 0.22) inset, 0 0 16px rgba(6, 182, 212, 0.18);
+    }
+    100% {
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(6, 182, 212, 0.1) inset;
+    }
 }
 
 @keyframes status-pulse {
     0% { transform: scale(0.95); opacity: 0.7; }
     100% { transform: scale(1.05); opacity: 1; }
+}
+
+@media (max-width: 1200px) {
+    .dashboard-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .metrics-bar {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 12px 18px;
+    }
+
+    .brand-mark {
+        width: 94px;
+        height: 94px;
+    }
+
+    h1 {
+        font-size: 1.18rem;
+    }
+
+    h1 .subtitle {
+        display: block;
+        font-size: 0.9rem;
+        margin-top: 1px;
+    }
+
+    .brand-caption {
+        font-size: 0.66rem;
+    }
+
+    .metric-item-model {
+        min-width: 100%;
+    }
+
+    .model-controls select {
+        flex: 1;
+        max-width: none;
+    }
 }

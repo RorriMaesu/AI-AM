@@ -18,6 +18,7 @@ workspace/sandbox_shared/output.txt
 database/*.db
 database/*.db-shm
 database/*.db-wal
+database/*.db-journal
 
 # OS / editor
 .DS_Store

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Antahkarana Cognitive Dashboard</title>
+    <title>AI-AM Cognitive Dashboard</title>
     <!-- Outfit Font -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <!-- Vis.js Standalone for GraphRAG Visualizer -->
@@ -15,8 +15,13 @@
         <!-- Header: Metacognitive Status Bar -->
         <header class="dashboard-header">
             <div class="header-main">
-                <span class="logo-glow"></span>
-                <h1>ANTAHKARANA <span class="subtitle">Cognitive Dashboard</span></h1>
+                <div class="brand-mark" aria-hidden="true">
+                    <img src="/images/AI_AM_logo.png" alt="AI-AM logo">
+                </div>
+                <div class="brand-text">
+                    <h1>AI-AM <span class="subtitle">Cognitive Dashboard</span></h1>
+                    <p class="brand-caption">Adaptive Intelligence Autonomous Mind</p>
+                </div>
             </div>
             
             <div class="metrics-bar">
@@ -48,6 +53,16 @@
                 <div class="metric-item">
                     <span class="metric-label">Connection</span>
                     <span id="connection-status" class="status-dot dot-offline"></span>
+                </div>
+                <div class="metric-item metric-item-model">
+                    <span class="metric-label">Model</span>
+                    <div class="model-controls">
+                        <select id="model-select" aria-label="Active model selector">
+                            <option value="">Loading models...</option>
+                        </select>
+                        <button id="model-apply-btn" type="button">Apply</button>
+                    </div>
+                    <span id="model-status" class="metric-val model-status">Not loaded</span>
                 </div>
             </div>
         </header>

@@ -1,0 +1,27 @@
+name: AI-AM CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+jobs:
+  syntax-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Python syntax check
+        run: |
+          python -m py_compile core/orchestrator.py
+          python -m py_compile database/db_manager.py
+          python -m py_compile training/sleep_tune.py
+          python -m py_compile tests/run_tests.py

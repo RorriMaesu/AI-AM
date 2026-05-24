@@ -15,6 +15,9 @@ const fatigueBar = document.getElementById('fatigue-bar');
 const fatigueVal = document.getElementById('fatigue-val');
 const curiosityBar = document.getElementById('curiosity-bar');
 const curiosityVal = document.getElementById('curiosity-val');
+const modelSelect = document.getElementById('model-select');
+const modelApplyBtn = document.getElementById('model-apply-btn');
+const modelStatus = document.getElementById('model-status');
 
 const chatMessages = document.getElementById('chat-messages');
 const chatForm = document.getElementById('chat-form');
@@ -27,6 +30,9 @@ const buddhiSlot = document.getElementById('telemetry-buddhi');
 
 const sandboxConsole = document.getElementById('sandbox-console');
 const ledgerLogs = document.getElementById('ledger-logs');
+
+let knownModels = [];
+let activeModel = null;
 
 // Initialize Vis.js Graph visualizer
 function initNetwork() {
@@ -119,6 +125,7 @@ function handleServerEvent(event) {
     switch (type) {
         case 'state_update':
             updateMetacognition(data);
+            syncModelFromState(data);
             break;
             
         case 'cycle_started':
@@ -147,6 +154,123 @@ function handleServerEvent(event) {
             
         default:
             console.log('Unhandled event type:', type);
+    }
+}
+
+function setModelStatus(text, isError = false) {
+    if (!modelStatus) return;
+    modelStatus.textContent = text;
+    modelStatus.style.color = isError ? '#f87171' : '#94a3b8';
+}
+
+function renderModelOptions(models, selectedModel) {
+    if (!modelSelect) return;
+    modelSelect.innerHTML = '';
+
+    if (!models || models.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No models found';
+        modelSelect.appendChild(option);
+        modelSelect.disabled = true;
+        if (modelApplyBtn) {
+            modelApplyBtn.disabled = true;
+        }
+        return;
+    }
+
+    modelSelect.disabled = false;
+    models.forEach((model) => {
+        const option = document.createElement('option');
+        option.value = model;
+        option.textContent = model;
+        modelSelect.appendChild(option);
+    });
+
+    if (selectedModel && models.includes(selectedModel)) {
+        modelSelect.value = selectedModel;
+    }
+
+    if (modelApplyBtn) {
+        modelApplyBtn.disabled = false;
+    }
+}
+
+function syncModelFromState(state) {
+    const runtimeModel = state?.llm_parameters?.model_name;
+    if (!runtimeModel) return;
+
+    activeModel = runtimeModel;
+    if (modelSelect && knownModels.includes(runtimeModel)) {
+        modelSelect.value = runtimeModel;
+    }
+    setModelStatus(`Active: ${runtimeModel}`);
+}
+
+async function loadModelInventory() {
+    if (!modelSelect || !modelApplyBtn) return;
+
+    modelApplyBtn.disabled = true;
+    setModelStatus('Loading model tags...');
+
+    try {
+        const response = await fetch('/api/models');
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+
+        knownModels = Array.isArray(payload.models) ? payload.models : [];
+        activeModel = payload.active_model || null;
+        renderModelOptions(knownModels, activeModel);
+
+        if (activeModel) {
+            setModelStatus(`Active: ${activeModel}`);
+        } else {
+            setModelStatus('Active model unknown');
+        }
+    } catch (error) {
+        renderModelOptions([], null);
+        setModelStatus(`Model load failed: ${error.message}`, true);
+        appendLedgerLog('failover', `Failed to load models from backend: ${error.message}`);
+    }
+}
+
+async function applySelectedModel() {
+    if (!modelSelect || !modelApplyBtn) return;
+    const requestedModel = modelSelect.value;
+    if (!requestedModel) return;
+
+    modelApplyBtn.disabled = true;
+    setModelStatus(`Switching to ${requestedModel}...`);
+
+    try {
+        const response = await fetch('/api/model/select', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ model: requestedModel })
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.status !== 'ok') {
+            throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+
+        activeModel = payload.active_model || requestedModel;
+        setModelStatus(`Active: ${activeModel}`);
+        appendLedgerLog('system', `Model switched to '${activeModel}'.`);
+
+        if (payload.warning) {
+            appendLedgerLog('failover', payload.warning);
+        }
+
+        await loadModelInventory();
+    } catch (error) {
+        setModelStatus(`Switch failed: ${error.message}`, true);
+        appendLedgerLog('failover', `Model switch failed: ${error.message}`);
+    } finally {
+        modelApplyBtn.disabled = false;
     }
 }
 
@@ -423,6 +547,12 @@ chatForm.addEventListener('submit', (e) => {
     }
 });
 
+if (modelApplyBtn) {
+    modelApplyBtn.addEventListener('click', () => {
+        applySelectedModel();
+    });
+}
+
 // HTML escaping helper
 function escapeHtml(text) {
     return text
@@ -443,4 +573,5 @@ function parseMarkdownCode(text) {
 
 // Boot UI
 initNetwork();
+loadModelInventory();
 connectWebSocket();

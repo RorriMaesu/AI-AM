@@ -175,7 +175,9 @@ class AntahkaranaOrchestrator:
         self.app = FastAPI(title="Antahkarana Cognitive Dashboard")
         
         ui_dir = os.path.abspath("ui")
+        images_dir = os.path.abspath("images")
         os.makedirs(ui_dir, exist_ok=True)
+        os.makedirs(images_dir, exist_ok=True)
             
         @self.app.get("/", response_class=HTMLResponse)
         async def get_index():
@@ -196,6 +198,57 @@ class AntahkaranaOrchestrator:
                 await self.input_queue.put(prompt)
                 return {"status": "queued", "prompt": prompt}
             return {"status": "empty"}
+
+        @self.app.get("/api/models")
+        async def get_models():
+            models = self.fetch_ollama_models_sync()
+            return {
+                "models": models,
+                "active_model": self.state.get("llm_parameters", {}).get("model_name", "gemma4:latest"),
+                "api_base": self.get_ollama_base_url()
+            }
+
+        @self.app.post("/api/model/select")
+        async def select_model(data: dict):
+            requested_model = (data or {}).get("model", "")
+            if not requested_model:
+                return {"status": "error", "message": "Missing model name."}
+
+            installed_models = self.fetch_ollama_models_sync()
+            if requested_model not in installed_models:
+                return {
+                    "status": "error",
+                    "message": f"Model '{requested_model}' is not available in Ollama tags.",
+                    "models": installed_models
+                }
+
+            current_model = self.state.get("llm_parameters", {}).get("model_name", "gemma4:latest")
+            if requested_model == current_model:
+                return {
+                    "status": "ok",
+                    "message": f"Model '{requested_model}' is already active.",
+                    "active_model": current_model,
+                    "models": installed_models
+                }
+
+            # Attempt to unload the currently active model to reduce VRAM pressure before switching.
+            unload_error = self.unload_ollama_model_by_name_sync(current_model)
+
+            self.state.setdefault("llm_parameters", {})["model_name"] = requested_model
+            self.save_state()
+            await self.broadcast("state_update", self.state)
+            self.log_ledger(f"Active model switched from '{current_model}' to '{requested_model}'.")
+
+            response = {
+                "status": "ok",
+                "message": f"Switched active model to '{requested_model}'.",
+                "active_model": requested_model,
+                "previous_model": current_model,
+                "models": installed_models
+            }
+            if unload_error:
+                response["warning"] = unload_error
+            return response
 
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
@@ -225,6 +278,46 @@ class AntahkaranaOrchestrator:
 
         # Mount static UI files last
         self.app.mount("/ui", StaticFiles(directory=ui_dir), name="ui")
+        self.app.mount("/images", StaticFiles(directory=images_dir), name="images")
+
+    def get_ollama_base_url(self) -> str:
+        """Returns the Ollama base URL derived from the configured completion endpoint."""
+        api_url = self.state.get("llm_parameters", {}).get("api_url", self.api_url)
+        if "/v1" in api_url:
+            return api_url.split("/v1")[0]
+        return api_url.rstrip("/")
+
+    def fetch_ollama_models_sync(self) -> List[str]:
+        """Returns currently installed Ollama model tags from /api/tags."""
+        base_url = self.get_ollama_base_url()
+        tags_url = f"{base_url}/api/tags"
+        models: List[str] = []
+        try:
+            response = httpx.get(tags_url, timeout=6.0)
+            if response.status_code == 200:
+                payload = response.json()
+                raw_models = payload.get("models", []) if isinstance(payload, dict) else []
+                for model in raw_models:
+                    name = model.get("name") if isinstance(model, dict) else None
+                    if name:
+                        models.append(name)
+        except Exception as e:
+            self.log_ledger(f"Unable to read Ollama tags from '{tags_url}': {e}")
+
+        # Keep ordering stable and remove duplicates.
+        return sorted(set(models))
+
+    def unload_ollama_model_by_name_sync(self, model_name: str) -> str:
+        """Requests Ollama to unload the given model; returns empty string on success."""
+        base_url = self.get_ollama_base_url()
+        unload_url = f"{base_url}/api/generate"
+        try:
+            response = httpx.post(unload_url, json={"model": model_name, "keep_alive": 0}, timeout=5.0)
+            if response.status_code == 200:
+                return ""
+            return f"Ollama unload returned status {response.status_code} while unloading '{model_name}'."
+        except Exception as e:
+            return f"Unable to unload '{model_name}' before switch: {e}"
 
     async def broadcast(self, event_type: str, data: dict):
         """Sends a JSON event to all connected WebSockets."""
@@ -680,17 +773,12 @@ class AntahkaranaOrchestrator:
     def unload_ollama_model_sync(self):
         """Synchronously tells Ollama to unload the current model from VRAM."""
         model_name = self.state.get("llm_parameters", {}).get("model_name", "gemma4:latest")
-        try:
-            base_url = self.api_url.split("/v1")[0]
-            unload_url = f"{base_url}/api/generate"
-            self.log_ledger(f"Sending unload request to Ollama for model '{model_name}' to release VRAM...")
-            response = httpx.post(unload_url, json={"model": model_name, "keep_alive": 0}, timeout=5.0)
-            if response.status_code == 200:
-                print(f"[Orchestrator] Ollama successfully unloaded model '{model_name}' from VRAM.")
-            else:
-                print(f"[Orchestrator] Ollama unload returned status {response.status_code}.")
-        except Exception as e:
-            print(f"[Orchestrator Error] Failed to unload Ollama model: {e}")
+        self.log_ledger(f"Sending unload request to Ollama for model '{model_name}' to release VRAM...")
+        error = self.unload_ollama_model_by_name_sync(model_name)
+        if error:
+            print(f"[Orchestrator Error] Failed to unload Ollama model: {error}")
+        else:
+            print(f"[Orchestrator] Ollama successfully unloaded model '{model_name}' from VRAM.")
 
     def shutdown(self):
         """Cleanly closes database handles, saves state, and terminates model server."""
