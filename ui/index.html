@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antahkarana Cognitive Dashboard</title>
+    <!-- Outfit Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- Vis.js Standalone for GraphRAG Visualizer -->
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header: Metacognitive Status Bar -->
+        <header class="dashboard-header">
+            <div class="header-main">
+                <span class="logo-glow"></span>
+                <h1>ANTAHKARANA <span class="subtitle">Cognitive Dashboard</span></h1>
+            </div>
+            
+            <div class="metrics-bar">
+                <div class="metric-item">
+                    <span class="metric-label">Operational State</span>
+                    <span id="operational-state-badge" class="state-badge badge-waking">Pramana (Waking)</span>
+                </div>
+                <div class="metric-item">
+                    <span class="metric-label">Arousal Index</span>
+                    <div class="progress-container">
+                        <div id="arousal-bar" class="progress-bar bar-arousal" style="width: 50%"></div>
+                    </div>
+                    <span id="arousal-val" class="metric-val">0.50</span>
+                </div>
+                <div class="metric-item">
+                    <span class="metric-label">Mental Fatigue</span>
+                    <div class="progress-container">
+                        <div id="fatigue-bar" class="progress-bar bar-fatigue" style="width: 0%"></div>
+                    </div>
+                    <span id="fatigue-val" class="metric-val">0.00</span>
+                </div>
+                <div class="metric-item">
+                    <span class="metric-label">Curiosity ($J_t$)</span>
+                    <div class="progress-container">
+                        <div id="curiosity-bar" class="progress-bar bar-curiosity" style="width: 0%"></div>
+                    </div>
+                    <span id="curiosity-val" class="metric-val">0.00</span>
+                </div>
+                <div class="metric-item">
+                    <span class="metric-label">Connection</span>
+                    <span id="connection-status" class="status-dot dot-offline"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace: Grid Layout -->
+        <main class="dashboard-grid">
+            <!-- Left Column: Interaction & GraphRAG -->
+            <section class="grid-col left-col">
+                <!-- Chat Window -->
+                <div class="panel chat-panel">
+                    <div class="panel-header">
+                        <h2>Awareness Stream</h2>
+                        <span class="panel-tag tag-cyan">Interactive</span>
+                    </div>
+                    <div id="chat-messages" class="chat-messages">
+                        <div class="system-message">System Loop active. Waiting for stimulus...</div>
+                    </div>
+                    <form id="chat-form" class="chat-form">
+                        <input type="text" id="chat-input" placeholder="Introduce a new cognitive stimulus..." autocomplete="off">
+                        <button type="submit" id="send-btn">
+                            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Chitta Memory Visualizer -->
+                <div class="panel graph-panel">
+                    <div class="panel-header">
+                        <h2>Chitta Subconscious GraphRAG</h2>
+                        <span class="panel-tag tag-emerald">Memory Nodes</span>
+                    </div>
+                    <div id="memory-graph-container" class="graph-container">
+                        <div class="graph-placeholder">No active memory connections loaded.</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Column: Fourfold Mind & Sandbox Logs -->
+            <section class="grid-col right-col">
+                <!-- Fourfold Telemetry -->
+                <div class="panel telemetry-panel">
+                    <div class="panel-header">
+                        <h2>Fourfold Mind Telemetry</h2>
+                        <span class="panel-tag tag-purple">Process Flow</span>
+                    </div>
+                    
+                    <div class="telemetry-flow">
+                        <!-- Manas Slot -->
+                        <div class="telemetry-slot slot-manas">
+                            <div class="slot-header">
+                                <span class="slot-dot dot-manas"></span>
+                                <h3>MANAS (Reactive Impulse)</h3>
+                            </div>
+                            <div id="telemetry-manas" class="slot-content empty-content">Awaiting sensory reaction...</div>
+                        </div>
+
+                        <!-- Chitta Slot -->
+                        <div class="telemetry-slot slot-chitta">
+                            <div class="slot-header">
+                                <span class="slot-dot dot-chitta"></span>
+                                <h3>CHITTA (Semantic Context)</h3>
+                            </div>
+                            <div id="telemetry-chitta" class="slot-content empty-content">Awaiting subconscious recall...</div>
+                        </div>
+
+                        <!-- Ahamkara Slot -->
+                        <div class="telemetry-slot slot-ahamkara">
+                            <div class="slot-header">
+                                <span class="slot-dot dot-ahamkara"></span>
+                                <h3>AHAMKARA (Ego Protection Filter)</h3>
+                            </div>
+                            <div id="telemetry-ahamkara" class="slot-content empty-content">Awaiting identity boundary filter...</div>
+                        </div>
+
+                        <!-- Buddhi Slot -->
+                        <div class="telemetry-slot slot-buddhi">
+                            <div class="slot-header">
+                                <span class="slot-dot dot-buddhi"></span>
+                                <h3>BUDDHI (Discerning Intellect Resolution)</h3>
+                            </div>
+                            <div id="telemetry-buddhi" class="slot-content empty-content">Awaiting logical resolution...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sandbox / Logs Row -->
+                <div class="logs-row">
+                    <!-- Sandbox Console -->
+                    <div class="panel sandbox-panel">
+                        <div class="panel-header">
+                            <h2>Karmendriya Sandbox</h2>
+                            <span class="panel-tag tag-amber">Docker Execution</span>
+                        </div>
+                        <div class="console-body">
+                            <div class="console-header">
+                                <span class="c-dot red"></span>
+                                <span class="c-dot yellow"></span>
+                                <span class="c-dot green"></span>
+                                <span class="console-title">agent_tool.py</span>
+                            </div>
+                            <div id="sandbox-console" class="console-content">
+                                <span class="console-prompt">Karmendriya:</span> Sandbox idle. Waiting for Buddhi python directives...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Ledger Logger -->
+                    <div class="panel ledger-panel">
+                        <div class="panel-header">
+                            <h2>Sakshi Ledger Log</h2>
+                            <span class="panel-tag tag-gray">System Journal</span>
+                        </div>
+                        <div id="ledger-logs" class="ledger-logs">
+                            <div class="log-entry system">[Ledger init] Observing system loops...</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    
+    <script src="/ui/app.js"></script>
+</body>
+</html>

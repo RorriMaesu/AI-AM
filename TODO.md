@@ -1,0 +1,30 @@
+# Antahkarana Multi-Agent Cognitive Architecture Checklist
+
+- [x] Planning & Architectural Design Phase
+  - [x] Incorporate user corrections for path portability, database constraints, test isolation, and weight preservation
+  - [x] Apply corrections for backend target (Ollama on port 11434), path relative enforcement, and single-model training alignment
+  - [x] Integrate lifecycle management requirements: graceful terminal shutdown, DB handshakes, process PID tracking, and PowerShell start/stop utilities
+  - [x] Finalize absolute removal of Ollama/11434 and enforce relative documentation pathing
+- [x] Base Configuration Setup
+  - [x] Re-create `/config/engine_config.json` targeting Ollama on port 11434 and Gemma 4 model parameters
+- [x] Database Initialization & Management
+  - [x] Verify `/database/db_manager.py` uses relative paths and cleans database handles on shutdown
+- [x] Core Orchestration Engine (`/core/orchestrator.py`)
+  - [x] Implement `AntahkaranaOrchestrator` pointing to port 11434 by default
+  - [x] Enforce relative pathing in all print logs and transaction streams
+- [x] Sleep-Tuning Pipeline (`/training/sleep_tune.py`)
+  - [x] Ensure training base model matches the waking Gemma 4 architecture using relative paths
+- [x] PowerShell Administration Utilities
+  - [x] Verify `start_mind.ps1` and `stop_mind.ps1` target port 11434 and gemma4:latest processes
+- [x] Validation & Test Suite (`/tests/run_tests.py`)
+  - [x] Re-create `/tests/run_tests.py` to target Ollama port 11434 and run loop validations
+- [x] Execute & Validate System
+  - [x] Run automated tests and verify logs, config variables, and adapter registers using relative outputs
+- [x] Autonomous Expansion Phase (Jijnasa, Karmendriyas, Vasanas)
+  - [x] Add `latent_desires_vasanas` configuration and curiosity tracker variable
+  - [x] Implement `get_max_similarity` in `db_manager.py` with strict ONNX/transformers error gating
+  - [x] Implement Jijnasa (Curiosity) Engine in `orchestrator.py` with `duckduckgo-search` integrations
+  - [x] Implement Karmendriya (Docker execution sandbox) volume mounting and feedback routing
+  - [x] Implement Vasanas weighted dreaming (Vikalpa) in `orchestrator.py`
+  - [x] Update `run_tests.py` to validate curiosity drift, web search query triggers, and sandbox run execution
+  - [x] Run validation run and confirm VRAM unloading and output persistence

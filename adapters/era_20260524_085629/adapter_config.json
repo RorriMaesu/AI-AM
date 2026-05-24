@@ -1,0 +1,20 @@
+{
+  "base_model_name_or_path": "unsloth/gemma-4-e4b-it",
+  "peft_type": "LORA",
+  "r": 16,
+  "lora_alpha": 32,
+  "target_modules": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj"
+  ],
+  "fan_in_fan_out": false,
+  "bias": "none",
+  "modules_to_save": null,
+  "timestamp": "20260524_085629",
+  "era_nodes_learned": 7
+}

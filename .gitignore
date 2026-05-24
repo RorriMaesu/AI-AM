@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Environment / secrets
+.env
+*.env
+
+# Logs and runtime artifacts
+logs/
+workspace/sandbox_shared/output.txt
+
+# Database runtime files
+database/*.db
+database/*.db-shm
+database/*.db-wal
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
