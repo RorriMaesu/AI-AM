@@ -12,6 +12,8 @@ import threading
 import subprocess
 import socket
 import urllib.parse
+import html
+import re
 from typing import Tuple, List, Dict, Any
 
 # Ensure the root folder is added to python module search path
@@ -74,6 +76,8 @@ class AntahkaranaOrchestrator:
         self.state.setdefault("browser_runtime", {})
         self.state["browser_runtime"]["capabilities"] = self.browser_capabilities
         self.state["browser_runtime"]["session"] = self.browser_controller.get_state().get("session", {})
+        self.state["browser_runtime"].setdefault("recent_actions", [])
+        self.state["browser_runtime"].setdefault("recent_frames", [])
 
         # Initialize Database Manager (relative path)
         from database.db_manager import ChittaStoreManager
@@ -166,6 +170,7 @@ class AntahkaranaOrchestrator:
                     "enabled": True,
                     "mode": "constrained",
                     "routing": "hybrid",
+                    "prefer_embedded_preview": True,
                     "target_browser": "edge",
                     "max_actions_per_cycle": 2,
                     "min_action_confidence": 0.55,
@@ -183,6 +188,7 @@ class AntahkaranaOrchestrator:
         browser_cfg.setdefault("enabled", True)
         browser_cfg.setdefault("mode", "constrained")
         browser_cfg.setdefault("routing", "hybrid")
+        browser_cfg.setdefault("prefer_embedded_preview", True)
         browser_cfg.setdefault("target_browser", "edge")
         browser_cfg.setdefault("max_actions_per_cycle", 2)
         browser_cfg.setdefault("min_action_confidence", 0.55)
@@ -229,6 +235,149 @@ class AntahkaranaOrchestrator:
         """Raises HTTPException using shared builder error-to-status mapping."""
         status_code = self.map_builder_error_to_http_status(error)
         raise HTTPException(status_code=status_code, detail=detail)
+
+    def get_browser_view_state(self) -> Dict[str, Any]:
+        """Returns browser state, merging desktop controller state with embedded-preview session data."""
+        controller_state = self.browser_controller.get_state()
+        browser_runtime = self.state.setdefault("browser_runtime", {})
+        browser_runtime.setdefault("recent_actions", [])
+        browser_runtime.setdefault("recent_frames", [])
+        return {
+            "session": browser_runtime.get("session") or controller_state.get("session", {}),
+            "recent_actions": browser_runtime.get("recent_actions") or controller_state.get("recent_actions", []),
+            "recent_frames": browser_runtime.get("recent_frames") or controller_state.get("recent_frames", []),
+        }
+
+    def append_browser_runtime_action(self, entry: Dict[str, Any]):
+        browser_runtime = self.state.setdefault("browser_runtime", {})
+        actions = browser_runtime.setdefault("recent_actions", [])
+        actions.append(entry)
+        if len(actions) > 120:
+            browser_runtime["recent_actions"] = actions[-120:]
+
+    def build_embedded_preview_session(self, goal: str, target_url: str, active: bool = True, paused: bool = False, reason: str = "preview_navigation") -> Dict[str, Any]:
+        browser_runtime = self.state.setdefault("browser_runtime", {})
+        existing = browser_runtime.get("session", {}) or {}
+        session_id = existing.get("session_id") or f"embedded_{int(time.time() * 1000)}"
+        session = {
+            "active": active,
+            "paused": paused,
+            "session_id": session_id,
+            "goal": goal,
+            "current_url": target_url,
+            "last_action": {
+                "type": reason,
+                "timestamp": datetime.datetime.now().isoformat(),
+            },
+            "last_frame": None,
+            "last_error": "",
+            "updated_at": datetime.datetime.now().isoformat(),
+            "transport": "embedded-preview",
+        }
+        browser_runtime["session"] = session
+        browser_runtime.setdefault("recent_frames", [])
+        self.append_browser_runtime_action({
+            "status": "ok",
+            "action": {
+                "type": reason,
+                "url": target_url,
+                "goal": goal,
+            },
+            "timestamp": datetime.datetime.now().isoformat(),
+            "transport": "embedded-preview",
+        })
+        return session
+
+    def pause_embedded_preview_session(self) -> Dict[str, Any]:
+        session = dict(self.state.setdefault("browser_runtime", {}).get("session", {}))
+        if not session.get("active"):
+            return {"status": "not_active", "session": session}
+        session["paused"] = True
+        session["updated_at"] = datetime.datetime.now().isoformat()
+        session["last_action"] = {"type": "pause", "timestamp": session["updated_at"]}
+        self.state["browser_runtime"]["session"] = session
+        self.append_browser_runtime_action({"status": "ok", "action": {"type": "pause"}, "timestamp": session["updated_at"], "transport": "embedded-preview"})
+        self.save_state()
+        return {"status": "paused", "session": session}
+
+    def resume_embedded_preview_session(self) -> Dict[str, Any]:
+        session = dict(self.state.setdefault("browser_runtime", {}).get("session", {}))
+        if not session.get("active"):
+            return {"status": "not_active", "session": session}
+        session["paused"] = False
+        session["updated_at"] = datetime.datetime.now().isoformat()
+        session["last_action"] = {"type": "resume", "timestamp": session["updated_at"]}
+        self.state["browser_runtime"]["session"] = session
+        self.append_browser_runtime_action({"status": "ok", "action": {"type": "resume"}, "timestamp": session["updated_at"], "transport": "embedded-preview"})
+        self.save_state()
+        return {"status": "resumed", "session": session}
+
+    def stop_embedded_preview_session(self, reason: str = "operator_stop") -> Dict[str, Any]:
+        session = dict(self.state.setdefault("browser_runtime", {}).get("session", {}))
+        if not session.get("active"):
+            return {"status": "already_stopped", "session": session}
+        session["active"] = False
+        session["paused"] = False
+        session["updated_at"] = datetime.datetime.now().isoformat()
+        session["last_action"] = {"type": "stop", "reason": reason, "timestamp": session["updated_at"]}
+        self.state["browser_runtime"]["session"] = session
+        self.append_browser_runtime_action({"status": "ok", "action": {"type": "stop", "reason": reason}, "timestamp": session["updated_at"], "transport": "embedded-preview"})
+        self.save_state()
+        return {"status": "stopped", "session": session}
+
+    async def fetch_url_preview_text(self, url: str) -> str:
+        """Fetches a URL and returns a compact text preview for embedded non-intrusive browsing."""
+        normalized_url = url.strip()
+        if not normalized_url:
+            return "No URL available for preview."
+
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            try:
+                response = await client.get(normalized_url, headers={"User-Agent": "AI-AM/1.0 (+embedded-preview)"})
+                response.raise_for_status()
+            except Exception as exc:
+                return f"[Preview fetch failed for '{normalized_url}': {exc}]"
+
+        body = response.text or ""
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", body, flags=re.IGNORECASE | re.DOTALL)
+        title = html.unescape(title_match.group(1).strip()) if title_match else normalized_url
+        body = re.sub(r"<script\b[^>]*>.*?</script>", " ", body, flags=re.IGNORECASE | re.DOTALL)
+        body = re.sub(r"<style\b[^>]*>.*?</style>", " ", body, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"<[^>]+>", " ", body)
+        text = html.unescape(re.sub(r"\s+", " ", text)).strip()
+        if len(text) > 3200:
+            text = text[:3200].rstrip() + "..."
+        return f"Title: {title}\nURL: {str(response.url)}\n\n{text or 'No readable text content extracted from page.'}"
+
+    async def build_embedded_preview_document(self, url: str) -> str:
+        preview_text = await self.fetch_url_preview_text(url)
+        escaped_url = html.escape(url)
+        escaped_preview = html.escape(preview_text)
+        return f"""<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\">
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+  <title>AI-AM Embedded Preview</title>
+  <style>
+    body {{ margin: 0; font-family: Arial, sans-serif; background: #0b1220; color: #e2e8f0; }}
+    .shell {{ min-height: 100vh; display: flex; flex-direction: column; }}
+    .bar {{ padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); background: #111827; }}
+    .label {{ font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; }}
+    .url {{ display: block; margin-top: 6px; color: #67e8f9; word-break: break-all; text-decoration: none; }}
+    .content {{ padding: 16px; white-space: pre-wrap; line-height: 1.5; font-size: 14px; }}
+  </style>
+</head>
+<body>
+  <div class=\"shell\">
+    <div class=\"bar\">
+      <div class=\"label\">Embedded Preview</div>
+      <a class=\"url\" href=\"{escaped_url}\" target=\"_blank\" rel=\"noreferrer noopener\">{escaped_url}</a>
+    </div>
+    <div class=\"content\">{escaped_preview}</div>
+  </div>
+</body>
+</html>"""
 
     def setup_web_server(self):
         """Sets up the FastAPI application and routes."""
@@ -329,9 +478,8 @@ class AntahkaranaOrchestrator:
 
         @self.app.get("/api/browser/state")
         async def get_browser_state():
-            browser_state = self.browser_controller.get_state()
+            browser_state = self.get_browser_view_state()
             self.state.setdefault("browser_runtime", {})
-            self.state["browser_runtime"]["session"] = browser_state.get("session", {})
             self.state["browser_runtime"]["capabilities"] = self.browser_capabilities
             return {
                 "status": "ok",
@@ -339,6 +487,13 @@ class AntahkaranaOrchestrator:
                 "capabilities": self.browser_capabilities,
                 "config": self.state.get("browser_autonomy", {})
             }
+
+        @self.app.get("/api/browser/preview", response_class=HTMLResponse)
+        async def get_browser_preview(url: str = ""):
+            if not url:
+                return HTMLResponse("<html><body style='background:#0b1220;color:#e2e8f0;font-family:Arial,sans-serif;padding:16px;'>No preview URL supplied.</body></html>", status_code=400)
+            preview_html = await self.build_embedded_preview_document(url)
+            return HTMLResponse(content=preview_html, status_code=200)
 
         @self.app.get("/api/browser/targets")
         async def get_browser_targets(
@@ -396,6 +551,13 @@ class AntahkaranaOrchestrator:
             if command == "start":
                 goal = (data or {}).get("goal", "autonomous browser session")
                 start_url = (data or {}).get("url", "")
+                if browser_cfg.get("prefer_embedded_preview", False):
+                    target_url = start_url.strip() or "https://duckduckgo.com"
+                    session = self.build_embedded_preview_session(goal, target_url, active=True, paused=False, reason="start")
+                    self.save_state()
+                    payload = {"status": "started", "session": session, "transport": "embedded-preview"}
+                    await self.broadcast("browser_session_started", payload)
+                    return payload
                 start_res = await asyncio.to_thread(
                     self.browser_controller.start_session,
                     goal,
@@ -412,16 +574,28 @@ class AntahkaranaOrchestrator:
                 return start_res
 
             if command == "pause":
+                if browser_cfg.get("prefer_embedded_preview", False):
+                    pause_res = self.pause_embedded_preview_session()
+                    await self.broadcast("browser_session_paused", pause_res)
+                    return pause_res
                 pause_res = await asyncio.to_thread(self.browser_controller.pause_session)
                 await self.broadcast("browser_session_paused", pause_res)
                 return pause_res
 
             if command == "resume":
+                if browser_cfg.get("prefer_embedded_preview", False):
+                    resume_res = self.resume_embedded_preview_session()
+                    await self.broadcast("browser_session_resumed", resume_res)
+                    return resume_res
                 resume_res = await asyncio.to_thread(self.browser_controller.resume_session)
                 await self.broadcast("browser_session_resumed", resume_res)
                 return resume_res
 
             if command == "stop":
+                if browser_cfg.get("prefer_embedded_preview", False):
+                    stop_res = self.stop_embedded_preview_session("operator_stop")
+                    await self.broadcast("browser_session_stopped", stop_res)
+                    return stop_res
                 stop_res = await asyncio.to_thread(self.browser_controller.stop_session, "operator_stop")
                 await self.broadcast("browser_session_stopped", stop_res)
                 return stop_res
@@ -455,7 +629,7 @@ class AntahkaranaOrchestrator:
                 await websocket.send_json({
                     "type": "browser_state",
                     "data": {
-                        "browser": self.browser_controller.get_state(),
+                        "browser": self.get_browser_view_state(),
                         "capabilities": self.browser_capabilities,
                         "config": self.state.get("browser_autonomy", {})
                     }
@@ -496,6 +670,20 @@ class AntahkaranaOrchestrator:
         browser_cfg = self.state.get("browser_autonomy", {})
         if not browser_cfg.get("enabled", False):
             return None
+
+        if browser_cfg.get("prefer_embedded_preview", False):
+            target_url = direct_url if direct_url else f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}"
+            goal_text = f"Curiosity exploration for URL: {direct_url}" if direct_url else f"Curiosity exploration for query: {query}"
+            session = self.build_embedded_preview_session(goal_text, target_url, active=True, paused=False, reason="curiosity_preview")
+            self.save_state()
+            await self.broadcast("browser_session_started", {"status": "started", "session": session, "transport": "embedded-preview"})
+            if direct_url:
+                preview_text = await self.fetch_url_preview_text(target_url)
+            else:
+                search_results = await self.execute_web_search(query)
+                preview_text = f"Embedded preview URL: {target_url}\n\n{search_results}"
+            await self.broadcast("browser_vision_update", {"status": "ok", "content": preview_text, "transport": "embedded-preview"})
+            return preview_text
 
         if not self.browser_capabilities.get("desktop_automation_available", False):
             self.log_ledger("Browser curiosity routing skipped: desktop automation unavailable.")
@@ -555,6 +743,112 @@ class AntahkaranaOrchestrator:
             await self.broadcast("browser_vision_update", vision_res)
             return vision_res.get("content") or "Screenshot captured, but visual content description was empty."
         return "Browser session active, but visual frame capture failed."
+
+    def build_curiosity_action_plan(self, search_query: str, direct_url: str = "") -> Dict[str, Any]:
+        """Plans candidate curiosity actions before policy gating and execution."""
+        browser_cfg = self.state.get("browser_autonomy", {})
+        routing = browser_cfg.get("routing", "hybrid")
+        target_url = direct_url or f"https://duckduckgo.com/?q={urllib.parse.quote_plus(search_query)}"
+
+        actions: List[Dict[str, Any]] = []
+        if browser_cfg.get("enabled", False) and routing in {"browser", "hybrid"}:
+            actions.append({
+                "type": "browse",
+                "query": search_query,
+                "direct_url": direct_url,
+                "target_url": target_url,
+                "transport": "embedded-preview" if browser_cfg.get("prefer_embedded_preview", False) else "desktop-automation",
+                "priority": 1,
+            })
+
+        # Always include search as a fallback path to guarantee non-empty curiosity enrichment.
+        actions.append({
+            "type": "search",
+            "query": direct_url or search_query,
+            "search_query": search_query,
+            "direct_url": direct_url,
+            "priority": 2,
+        })
+
+        return {
+            "objective": "curiosity_enrichment",
+            "query": search_query,
+            "direct_url": direct_url,
+            "actions": actions,
+        }
+
+    def apply_curiosity_policy(self, plan: Dict[str, Any]) -> Dict[str, Any]:
+        """Applies guardrails to the planned curiosity actions."""
+        browser_cfg = self.state.get("browser_autonomy", {})
+        blocked_patterns = [p.lower() for p in browser_cfg.get("blocked_patterns", [])]
+        approved: List[Dict[str, Any]] = []
+        rejected: List[Dict[str, Any]] = []
+
+        for action in plan.get("actions", []):
+            action_type = action.get("type", "")
+            action_target = (action.get("target_url") or action.get("query") or "").lower()
+            hit_pattern = next((pattern for pattern in blocked_patterns if pattern and pattern in action_target), None)
+            if hit_pattern and action_type == "browse":
+                rejected.append({
+                    "action": action,
+                    "reason": f"blocked pattern '{hit_pattern}' matched browse target",
+                })
+                continue
+            approved.append(action)
+
+        return {
+            "approved": approved,
+            "rejected": rejected,
+            "objective": plan.get("objective", "curiosity_enrichment"),
+            "query": plan.get("query", ""),
+            "direct_url": plan.get("direct_url", ""),
+        }
+
+    async def execute_curiosity_actions(self, policy_plan: Dict[str, Any], base_stimulus: str) -> Dict[str, Any]:
+        """Executes policy-approved curiosity actions in order until enrichment is obtained."""
+        active_stimulus = base_stimulus
+        browser_feedback = None
+        search_results = None
+        chosen_action = None
+
+        for action in policy_plan.get("approved", []):
+            action_type = action.get("type")
+            if action_type == "browse":
+                chosen_action = action
+                browser_feedback = await self.run_browser_curiosity_exploration(
+                    action.get("query", ""),
+                    direct_url=action.get("direct_url", ""),
+                )
+                if browser_feedback:
+                    active_stimulus = (
+                        f"[Browser Exploration Triggered for search query: '{policy_plan.get('query', '')}']\n"
+                        f"The browser session captured visual frames. VLM screenshot analysis reveals:\n"
+                        f"\"\"\"\n{browser_feedback}\n\"\"\"\n"
+                        f"Use the visual observations above to inform your subsequent reasoning and resolution."
+                    )
+                    break
+
+            if action_type == "search":
+                chosen_action = action
+                query_value = action.get("query", "")
+                search_results = await self.execute_web_search(query_value)
+                active_stimulus = (
+                    f"[Search Results for: '{policy_plan.get('query', '')}']\n\n"
+                    f"Web Snippets:\n{search_results}\n\n"
+                    f"Original Stimulus: {base_stimulus}"
+                )
+                await self.broadcast("curiosity_search", {
+                    "query": policy_plan.get("query", query_value),
+                    "results": search_results,
+                })
+                break
+
+        return {
+            "active_stimulus": active_stimulus,
+            "browser_feedback": browser_feedback,
+            "search_results": search_results,
+            "chosen_action": chosen_action,
+        }
 
     def get_ollama_base_url(self) -> str:
         """Returns the Ollama base URL derived from the configured completion endpoint."""
@@ -946,37 +1240,22 @@ class AntahkaranaOrchestrator:
                         search_query, _ = await self.call_inference_slot(dream_system, "Generate search query.", 0.7, top_p=0.9)
                         search_query = search_query.strip().replace('"', '')
 
-                browser_cfg = self.state.get("browser_autonomy", {})
-                browser_feedback = None
-                if browser_cfg.get("enabled", False) and browser_cfg.get("routing", "hybrid") in ["browser", "hybrid"]:
-                    browser_feedback = await self.run_browser_curiosity_exploration(search_query, direct_url=direct_url)
+                self.log_ledger(f"Curiosity limit crossed (J_t >= 0.75). Planning actions for: '{search_query}'")
+                action_plan = self.build_curiosity_action_plan(search_query, direct_url=direct_url)
+                await self.broadcast("browser_action_planned", {
+                    "objective": action_plan.get("objective", "curiosity_enrichment"),
+                    "query": search_query,
+                    "actions": action_plan.get("actions", []),
+                })
 
-                if browser_feedback:
-                    active_stimulus = (
-                        f"[Browser Exploration Triggered for search query: '{search_query}']\n"
-                        f"The browser session captured visual frames. VLM screenshot analysis reveals:\n"
-                        f"\"\"\"\n{browser_feedback}\n\"\"\"\n"
-                        f"Use the visual observations above to inform your subsequent reasoning and resolution."
-                    )
-                    self.state["internal_workspace"]["current_stimulus"] = active_stimulus
-                    self.save_state()
-                else:
-                    self.log_ledger(f"Curiosity limit crossed (J_t >= 0.75). Running search/fetch for: '{search_query}'")
-                    if direct_url:
-                        search_results = await self.execute_web_search(direct_url)
-                    else:
-                        search_results = await self.execute_web_search(search_query)
-                    active_stimulus = (
-                        f"[Search Results for: '{search_query}']\n\n"
-                        f"Web Snippets:\n{search_results}\n\n"
-                        f"Original Stimulus: {active_stimulus}"
-                    )
-                    self.state["internal_workspace"]["current_stimulus"] = active_stimulus
-                    self.save_state()
-                    await self.broadcast("curiosity_search", {
-                        "query": search_query,
-                        "results": search_results
-                    })
+                policy_plan = self.apply_curiosity_policy(action_plan)
+                for blocked in policy_plan.get("rejected", []):
+                    await self.broadcast("browser_guardrail_blocked", blocked)
+
+                execution_result = await self.execute_curiosity_actions(policy_plan, active_stimulus)
+                active_stimulus = execution_result.get("active_stimulus", active_stimulus)
+                self.state["internal_workspace"]["current_stimulus"] = active_stimulus
+                self.save_state()
             # 2. TIER 1 Execution: Concurrent processing of Manas and Chitta
             manas_system = (
                 f"You are MANAS, the reactive sensory processor layer of a human mind.\n"

@@ -33,6 +33,7 @@ const buddhiSlot = document.getElementById('telemetry-buddhi');
 const sandboxConsole = document.getElementById('sandbox-console');
 const ledgerLogs = document.getElementById('ledger-logs');
 
+const browserPreviewFrame = document.getElementById('browser-preview-frame');
 const browserFrame = document.getElementById('browser-frame');
 const browserFrameEmpty = document.getElementById('browser-frame-empty');
 const browserSessionStatus = document.getElementById('browser-session-status');
@@ -60,6 +61,8 @@ let activeModel = null;
 let shutdownRequested = false;
 let shutdownInFlight = false;
 let panelCollapseState = {};
+let currentBrowserSession = null;
+let latestBrowserFrame = null;
 
 function getAllCollapsiblePanels() {
     return Array.from(document.querySelectorAll('.collapsible-panel'));
@@ -881,16 +884,40 @@ function normalizeFramePath(framePath) {
     return '/' + framePath;
 }
 
+function renderBrowserSurface() {
+    const hasEmbeddedPreview = currentBrowserSession?.transport === 'embedded-preview' && currentBrowserSession?.current_url;
+    const hasDesktopFrame = Boolean(latestBrowserFrame?.path);
+
+    if (browserPreviewFrame) {
+        if (hasEmbeddedPreview) {
+            browserPreviewFrame.src = `/api/browser/preview?url=${encodeURIComponent(currentBrowserSession.current_url)}&t=${Date.now()}`;
+            browserPreviewFrame.style.display = 'block';
+        } else {
+            browserPreviewFrame.style.display = 'none';
+            browserPreviewFrame.removeAttribute('src');
+        }
+    }
+
+    if (browserFrame) {
+        browserFrame.style.display = hasEmbeddedPreview ? 'none' : (hasDesktopFrame ? 'block' : 'none');
+    }
+
+    if (browserFrameEmpty) {
+        browserFrameEmpty.style.display = (!hasEmbeddedPreview && !hasDesktopFrame) ? 'flex' : 'none';
+        browserFrameEmpty.textContent = hasEmbeddedPreview
+            ? 'Loading embedded preview...'
+            : 'No browser frame yet.';
+    }
+}
+
 function renderBrowserFrame(frame) {
     if (!browserFrame || !frame) return;
     const normalized = normalizeFramePath(frame.path);
     if (!normalized) return;
 
+    latestBrowserFrame = frame;
     browserFrame.src = `${normalized}?t=${Date.now()}`;
-    browserFrame.style.display = 'block';
-    if (browserFrameEmpty) {
-        browserFrameEmpty.style.display = 'none';
-    }
+    renderBrowserSurface();
 }
 
 function appendBrowserLog(text, category = 'normal') {
@@ -909,6 +936,7 @@ function appendBrowserLog(text, category = 'normal') {
 
 function updateBrowserSessionUI(session) {
     if (!session) return;
+    currentBrowserSession = session;
     if (browserSessionStatus) {
         if (session.active && session.paused) {
             browserSessionStatus.textContent = 'Paused';
@@ -921,6 +949,7 @@ function updateBrowserSessionUI(session) {
     if (browserCurrentUrl) {
         browserCurrentUrl.textContent = session.current_url || 'N/A';
     }
+    renderBrowserSurface();
 }
 
 function handleBrowserStateSnapshot(payload) {
@@ -932,6 +961,9 @@ function handleBrowserStateSnapshot(payload) {
     const recentFrames = browser.recent_frames || [];
     if (recentFrames.length > 0) {
         renderBrowserFrame(recentFrames[recentFrames.length - 1]);
+    } else {
+        latestBrowserFrame = null;
+        renderBrowserSurface();
     }
 
     const recentActions = browser.recent_actions || [];

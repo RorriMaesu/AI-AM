@@ -268,6 +268,33 @@ async def main():
         curiosity_2 = orchestrator.state["metacognition"]["curiosity_index"]
         print(f"Curiosity Index after Vikalpa trigger: {curiosity_2:.4f}")
         assert curiosity_2 == 0.0, "Curiosity index was not reset to 0.0 after Vasanas query trigger!"
+
+        # Validate new planner-policy-executor path artifacts
+        with open(log_path, "r", encoding="utf-8") as f:
+            ledger_text = f.read()
+        assert "Planning actions for" in ledger_text, "Planner-policy-executor marker not found in ledger logs."
+
+        sample_plan = orchestrator.build_curiosity_action_plan(
+            "structured testing for curiosity planner",
+            direct_url="https://duckduckgo.com/?q=planner+path"
+        )
+        assert len(sample_plan.get("actions", [])) >= 1, "Curiosity action plan returned no actions."
+
+        policy_result = orchestrator.apply_curiosity_policy(sample_plan)
+        assert len(policy_result.get("approved", [])) >= 1, "Curiosity policy rejected all actions unexpectedly."
+
+        # Blocked URL should reject browse action while preserving fallback search action
+        blocked_plan = orchestrator.build_curiosity_action_plan(
+            "blocked browse policy test",
+            direct_url="https://example.com/login"
+        )
+        blocked_policy = orchestrator.apply_curiosity_policy(blocked_plan)
+        rejected_reasons = "\n".join([r.get("reason", "") for r in blocked_policy.get("rejected", [])])
+        assert "blocked pattern" in rejected_reasons.lower(), "Blocked browse policy did not reject sensitive URL pattern."
+        assert any(a.get("type") == "search" for a in blocked_policy.get("approved", [])), "Fallback search action missing after browse rejection."
+
+        preview_html = await orchestrator.build_embedded_preview_document("https://duckduckgo.com/?q=embedded+preview+test")
+        assert "AI-AM Embedded Preview" in preview_html, "Embedded preview document generation failed."
         
         # Verify that current stimulus contains search results
         current_stim = orchestrator.state["internal_workspace"]["current_stimulus"]
