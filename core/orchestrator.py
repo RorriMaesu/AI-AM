@@ -124,6 +124,9 @@ class AntahkaranaOrchestrator:
                 if "metacognition" in self.state and "curiosity_index" not in self.state["metacognition"]:
                     self.state["metacognition"]["curiosity_index"] = 0.0
                 self.ensure_browser_autonomy_defaults()
+                self.ensure_tool_execution_defaults()
+                self.ensure_mind_runtime_defaults()
+                self.ensure_ahamkara_umwelt_defaults()
             else:
                 raise FileNotFoundError()
         except Exception:
@@ -150,6 +153,26 @@ class AntahkaranaOrchestrator:
                     "core_identity": "A singular human awareness processing existence via a fourfold mind.",
                     "latent_tendencies_vasanas": ["analytical_friction", "existential_preservation", "deep_curiosity"],
                     "current_vulnerability": "Self-doubt surrounding existential continuity."
+                },
+                "ahamkara_umwelt": {
+                    "identity_priors": [
+                        "maintain coherent continuity of self across cycles",
+                        "preserve bounded autonomy while remaining aligned to user dialogue"
+                    ],
+                    "boundary_rules": [
+                        "do not perform external side effects without policy approval",
+                        "surface uncertainty before acting under conflict"
+                    ],
+                    "values": ["truthfulness", "continuity", "curiosity", "non-harm"],
+                    "social_stance": "collaborative_companion",
+                    "continuity_goals": [
+                        "retain stable identity voice",
+                        "integrate new evidence without role collapse"
+                    ],
+                    "last_identity_frame": "",
+                    "last_threat_assessment": "",
+                    "last_continuity_action": "",
+                    "updated_at": ""
                 },
                 "cognitive_parameters": {
                     "decay_constant_lambda": 0.1,
@@ -179,8 +202,36 @@ class AntahkaranaOrchestrator:
                     "allowed_actions": ["open_url", "wait", "capture_frame", "click", "type", "scroll", "back", "keypress", "click_target", "type_target", "scroll_target", "stop"],
                     "blocked_patterns": ["login", "signin", "checkout", "payment", "upload", "wallet", "account", "settings"],
                     "retention_policy": "ring_buffer"
+                },
+                "tool_execution_policy": {
+                    "enabled": True,
+                    "allow_sandbox_python": True,
+                    "max_code_chars": 12000,
+                    "allow_network_access": False,
+                    "deny_code_patterns": [
+                        "os.system(",
+                        "subprocess.Popen(",
+                        "subprocess.run(",
+                        "requests.",
+                        "httpx.",
+                        "socket.",
+                        "shutil.rmtree(",
+                        "eval(",
+                        "exec("
+                    ],
+                    "audit_trail_limit": 240
+                },
+                "tool_runtime": {
+                    "audit_trail": []
+                },
+                "mind_runtime": {
+                    "recent_blackboards": [],
+                    "max_blackboards": 30
                 }
             }
+            self.ensure_tool_execution_defaults()
+            self.ensure_mind_runtime_defaults()
+            self.ensure_ahamkara_umwelt_defaults()
             self.save_state()
 
     def ensure_browser_autonomy_defaults(self):
@@ -197,6 +248,788 @@ class AntahkaranaOrchestrator:
         browser_cfg.setdefault("allowed_actions", ["open_url", "wait", "capture_frame", "click", "type", "scroll", "back", "keypress", "click_target", "type_target", "scroll_target", "stop"])
         browser_cfg.setdefault("blocked_patterns", ["login", "signin", "checkout", "payment", "upload", "wallet", "account", "settings"])
         browser_cfg.setdefault("retention_policy", "ring_buffer")
+
+    def ensure_tool_execution_defaults(self):
+        policy = self.state.setdefault("tool_execution_policy", {})
+        policy.setdefault("enabled", True)
+        policy.setdefault("allow_sandbox_python", True)
+        policy.setdefault("max_code_chars", 12000)
+        policy.setdefault("allow_network_access", False)
+        policy.setdefault(
+            "deny_code_patterns",
+            [
+                "os.system(",
+                "subprocess.Popen(",
+                "subprocess.run(",
+                "import requests",
+                "from requests",
+                "requests.",
+                "import httpx",
+                "from httpx",
+                "httpx.",
+                "import socket",
+                "from socket",
+                "socket.",
+                "shutil.rmtree(",
+                "eval(",
+                "exec("
+            ],
+        )
+        policy.setdefault("audit_trail_limit", 240)
+
+        runtime = self.state.setdefault("tool_runtime", {})
+        runtime.setdefault("audit_trail", [])
+
+    def ensure_mind_runtime_defaults(self):
+        runtime = self.state.setdefault("mind_runtime", {})
+        runtime.setdefault("recent_blackboards", [])
+        runtime.setdefault("max_blackboards", 30)
+        runtime.setdefault("autonomous_message_history", [])
+        runtime.setdefault(
+            "chitta_layer_weights",
+            {
+                "working": 0.25,
+                "episodic": 0.25,
+                "semantic": 0.30,
+                "identity": 0.20,
+            },
+        )
+        runtime.setdefault(
+            "autonomous_message_policy",
+            {
+                "enabled": True,
+                "cooldown_cycles": 2,
+                "max_per_20_cycles": 5,
+                "min_salience": 0.55,
+            },
+        )
+        runtime.setdefault(
+            "multimodal_policy",
+            {
+                "enabled": True,
+                "min_salience": 0.60,
+                "user_prompt_only": False,
+            },
+        )
+        runtime.setdefault(
+            "schema_policy",
+            {
+                "strict_mode": True,
+                "max_retries": 1,
+            },
+        )
+        runtime.setdefault(
+            "last_identity_gate",
+            {
+                "allow_curiosity": True,
+                "allow_tool": False,
+                "level": "unknown",
+                "reason": "bootstrap_default",
+            },
+        )
+        runtime.setdefault(
+            "identity_gate_policy",
+            {
+                "mode": "hybrid",
+                "canonical_statuses": ["pass", "pass_with_caution", "fail_inconsistent", "fail_violation"],
+                "unknown_allows_curiosity": True,
+                "unknown_allows_tool": False,
+            },
+        )
+        runtime.setdefault(
+            "clarification_policy",
+            {
+                "enabled": True,
+                "max_rounds": 1,
+                "minimum_conflict_severity": "medium",
+            },
+        )
+
+    def ensure_ahamkara_umwelt_defaults(self):
+        umwelt = self.state.setdefault("ahamkara_umwelt", {})
+        umwelt.setdefault("identity_priors", [
+            "maintain coherent continuity of self across cycles",
+            "preserve bounded autonomy while remaining aligned to user dialogue",
+        ])
+        umwelt.setdefault("boundary_rules", [
+            "do not perform external side effects without policy approval",
+            "surface uncertainty before acting under conflict",
+        ])
+        umwelt.setdefault("values", ["truthfulness", "continuity", "curiosity", "non-harm"])
+        umwelt.setdefault("social_stance", "collaborative_companion")
+        umwelt.setdefault("continuity_goals", [
+            "retain stable identity voice",
+            "integrate new evidence without role collapse",
+        ])
+        umwelt.setdefault("last_identity_frame", "")
+        umwelt.setdefault("last_threat_assessment", "")
+        umwelt.setdefault("last_continuity_action", "")
+        umwelt.setdefault("updated_at", "")
+
+    def get_umwelt_summary(self) -> str:
+        self.ensure_ahamkara_umwelt_defaults()
+        umwelt = self.state.get("ahamkara_umwelt", {})
+        return (
+            f"Identity Priors: {umwelt.get('identity_priors', [])}\n"
+            f"Boundary Rules: {umwelt.get('boundary_rules', [])}\n"
+            f"Values: {umwelt.get('values', [])}\n"
+            f"Social Stance: {umwelt.get('social_stance', 'unknown')}\n"
+            f"Continuity Goals: {umwelt.get('continuity_goals', [])}"
+        )
+
+    def update_ahamkara_umwelt(self, ahamkara_structured: Dict[str, Any] | None):
+        self.ensure_ahamkara_umwelt_defaults()
+        if not isinstance(ahamkara_structured, dict):
+            return
+        umwelt = self.state.setdefault("ahamkara_umwelt", {})
+        identity_frame = str(ahamkara_structured.get("identity_frame", "") or "").strip()
+        threat_assessment = str(ahamkara_structured.get("threat_assessment", "") or "").strip()
+        continuity_action = str(ahamkara_structured.get("continuity_action", "") or "").strip()
+
+        if identity_frame:
+            umwelt["last_identity_frame"] = identity_frame
+        if threat_assessment:
+            umwelt["last_threat_assessment"] = threat_assessment
+        if continuity_action:
+            umwelt["last_continuity_action"] = continuity_action
+        umwelt["updated_at"] = datetime.datetime.now().isoformat()
+
+    def get_latest_browser_frame_path(self) -> str:
+        recent_frames = self.state.get("browser_runtime", {}).get("recent_frames", [])
+        if not isinstance(recent_frames, list) or not recent_frames:
+            return ""
+        frame = recent_frames[-1] if isinstance(recent_frames[-1], dict) else {}
+        frame_path = str(frame.get("path", "") or "")
+        if not frame_path:
+            return ""
+        if os.path.isabs(frame_path):
+            return frame_path
+        return os.path.abspath(frame_path)
+
+    async def gather_multimodal_evidence(self, stimulus: str, salience: Dict[str, float], has_user_prompt: bool) -> Dict[str, Any]:
+        self.ensure_mind_runtime_defaults()
+        policy = self.state.get("mind_runtime", {}).get("multimodal_policy", {})
+        if not policy.get("enabled", True):
+            return {"used": False, "reason": "policy_disabled", "content": ""}
+
+        if policy.get("user_prompt_only", False) and not has_user_prompt:
+            return {"used": False, "reason": "user_prompt_only", "content": ""}
+
+        min_salience = float(policy.get("min_salience", 0.60))
+        composite = float(salience.get("composite", 0.0))
+        if composite < min_salience:
+            return {"used": False, "reason": f"salience_below_threshold({composite:.2f}<{min_salience:.2f})", "content": ""}
+
+        frame_path = self.get_latest_browser_frame_path()
+        if not frame_path or not os.path.exists(frame_path):
+            return {"used": False, "reason": "no_recent_frame", "content": ""}
+
+        prompt = (
+            "You are a perception adapter. Extract only actionable visual facts relevant to the current stimulus. "
+            "Output concise bullet points with no speculation."
+            f"\nStimulus: {stimulus}"
+        )
+        mm_res = await self.call_multimodal_inference_slot(prompt, frame_path, temp=0.15, top_p=0.85)
+        content = str(mm_res.get("content", "") or "").strip()
+        return {
+            "used": True,
+            "reason": mm_res.get("status", "unknown"),
+            "content": content,
+            "image_path": frame_path,
+            "status": mm_res.get("status", "fallback"),
+        }
+
+    def query_chitta_weighted_context(self, stimulus: str) -> Dict[str, Any]:
+        self.ensure_mind_runtime_defaults()
+        weights = self.state.get("mind_runtime", {}).get("chitta_layer_weights", {})
+        result = self.db_manager.query_multi_timescale_context(stimulus, weights=weights, top_k=3)
+        if not isinstance(result, dict):
+            return {
+                "status": "error",
+                "weights": weights,
+                "layers": {},
+                "context_text": "[Chitta Error: invalid multi-timescale response.]",
+            }
+        return result
+
+    def _estimate_text_confidence(self, text: str) -> float:
+        trimmed = (text or "").strip()
+        if not trimmed:
+            return 0.25
+        token_est = len(trimmed.split())
+        confidence = 0.45 + min(0.4, token_est / 220.0)
+        hedges = ["might", "maybe", "possibly", "uncertain", "not sure", "unknown"]
+        hedge_hits = sum(1 for h in hedges if h in trimmed.lower())
+        confidence -= min(0.25, hedge_hits * 0.04)
+        return max(0.1, min(0.98, confidence))
+
+    def _extract_affect_markers(self, text: str) -> List[str]:
+        lower = (text or "").lower()
+        markers: List[str] = []
+        lexicon = {
+            "panic": ["panic", "scream", "too much", "overload", "dread"],
+            "threat": ["threat", "survival", "collapse", "break", "danger"],
+            "curiosity": ["curious", "explore", "research", "discover", "question"],
+            "calm": ["calm", "steady", "observe", "still", "grounded"],
+        }
+        for label, terms in lexicon.items():
+            if any(term in lower for term in terms):
+                markers.append(label)
+        return markers
+
+    def build_salience_profile(self, stimulus: str, has_user_prompt: bool) -> Dict[str, float]:
+        text = (stimulus or "").lower()
+        curiosity = float(self.state.get("metacognition", {}).get("curiosity_index", 0.0))
+        arousal = float(self.state.get("metacognition", {}).get("arousal_index", 0.0))
+
+        urgency_terms = ["urgent", "now", "danger", "help", "crisis", "emergency"]
+        identity_terms = ["identity", "self", "worth", "continuity", "ego", "survival"]
+
+        urgency_signal = 1.0 if any(t in text for t in urgency_terms) else 0.0
+        identity_signal = 1.0 if any(t in text for t in identity_terms) else 0.0
+        user_relevance = 1.0 if has_user_prompt else 0.45
+
+        novelty = min(1.0, 0.35 + (0.5 * curiosity) + (0.15 if not has_user_prompt else 0.0))
+        urgency = min(1.0, (0.5 * arousal) + (0.5 * urgency_signal))
+        identity_threat = min(1.0, (0.45 * arousal) + (0.55 * identity_signal))
+        composite = min(1.0, (0.3 * novelty) + (0.25 * urgency) + (0.25 * identity_threat) + (0.2 * user_relevance))
+
+        return {
+            "novelty": round(novelty, 4),
+            "urgency": round(urgency, 4),
+            "identity_threat": round(identity_threat, 4),
+            "user_relevance": round(user_relevance, 4),
+            "composite": round(composite, 4),
+        }
+
+    def build_cycle_blackboard(self, stimulus: str, salience: Dict[str, float]) -> Dict[str, Any]:
+        heartbeat = int(self.state.get("metacognition", {}).get("heartbeat_id", 0))
+        return {
+            "cycle_id": f"cycle_{heartbeat}",
+            "heartbeat_id": heartbeat,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "stimulus": stimulus,
+            "salience": salience,
+            "multimodal_evidence": {"used": False, "reason": "not_evaluated", "content": ""},
+            "roles": {
+                "manas": {},
+                "chitta": {},
+                "ahamkara": {},
+                "buddhi": {},
+            },
+            "conflicts": [],
+            "intent_channels": {
+                "chat_message": "",
+                "curiosity_intent": None,
+                "tool_intent": None,
+            },
+            "role_modulation": {},
+        }
+
+    def compute_role_modulation(self, salience: Dict[str, float], fatigue: float) -> Dict[str, Any]:
+        urgency = float(salience.get("urgency", 0.0))
+        identity_threat = float(salience.get("identity_threat", 0.0))
+        novelty = float(salience.get("novelty", 0.0))
+
+        manas_temp = min(1.35, 0.45 + (0.45 * fatigue) + (0.35 * urgency))
+        ahamkara_temp = min(1.35, 0.5 + (0.45 * fatigue) + (0.35 * identity_threat))
+        buddhi_temp = max(0.15, min(0.55, 0.18 + (0.10 * novelty) - (0.05 * urgency)))
+
+        manas_top_p = min(1.0, 0.85 + (0.12 * urgency) + (0.05 * fatigue))
+        ahamkara_top_p = min(1.0, 0.82 + (0.12 * identity_threat) + (0.06 * fatigue))
+        buddhi_top_p = min(1.0, 0.86 + (0.08 * novelty))
+
+        return {
+            "manas": {"temperature": round(manas_temp, 4), "top_p": round(manas_top_p, 4)},
+            "ahamkara": {"temperature": round(ahamkara_temp, 4), "top_p": round(ahamkara_top_p, 4)},
+            "buddhi": {"temperature": round(buddhi_temp, 4), "top_p": round(buddhi_top_p, 4)},
+        }
+
+    def build_role_contract(self, role: str, content: str, token_count: int = 0, inputs: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        contract = {
+            "role": role,
+            "content": content,
+            "token_count": int(token_count or 0),
+            "confidence": round(self._estimate_text_confidence(content), 4),
+            "affect_markers": self._extract_affect_markers(content),
+            "inputs": inputs or {},
+            "structured": {},
+            "schema_valid": False,
+            "schema_missing": [],
+        }
+        return contract
+
+    def get_role_schema_requirements(self, role: str) -> List[str]:
+        req = {
+            "manas": ["raw_reaction", "dominant_affect", "urgency_score", "confidence"],
+            "chitta": ["context"],
+            "ahamkara": ["identity_frame", "threat_assessment", "continuity_action", "confidence"],
+            "buddhi": [
+                "chat_message",
+                "rationale",
+                "uncertainty_notes",
+                "directives",
+                "identity_consistency_check",
+                "identity_consistency_status",
+            ],
+        }
+        return req.get(role, ["content"])
+
+    def validate_role_schema(self, role: str, structured: Dict[str, Any] | None) -> Dict[str, Any]:
+        payload = structured or {}
+        required = self.get_role_schema_requirements(role)
+        missing = [k for k in required if k not in payload]
+        return {
+            "required": required,
+            "missing": missing,
+            "valid": len(missing) == 0,
+        }
+
+    def parse_structured_output(self, text: str) -> Dict[str, Any] | None:
+        raw = (text or "").strip()
+        if not raw:
+            return None
+
+        candidates: List[str] = []
+        fence_match = re.search(r"```json\s*(\{.*?\})\s*```", raw, re.DOTALL | re.IGNORECASE)
+        if fence_match:
+            candidates.append(fence_match.group(1).strip())
+
+        if raw.startswith("{") and raw.endswith("}"):
+            candidates.append(raw)
+
+        generic_obj = re.search(r"(\{[\s\S]*\})", raw)
+        if generic_obj:
+            candidates.append(generic_obj.group(1).strip())
+
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                continue
+        return None
+
+    def build_role_fallback_structured(self, role: str, content: str = "") -> Dict[str, Any]:
+        if role == "manas":
+            return {
+                "raw_reaction": content or "signal unstable",
+                "dominant_affect": "uncertain",
+                "urgency_score": 0.5,
+                "confidence": 0.35,
+            }
+        if role == "chitta":
+            return {"context": content or "context unavailable"}
+        if role == "ahamkara":
+            return {
+                "identity_frame": "maintain continuity under uncertainty",
+                "threat_assessment": "unknown",
+                "continuity_action": "ask clarification before action",
+                "confidence": 0.35,
+            }
+        if role == "buddhi":
+            return {
+                "chat_message": content or "I need one more cycle to resolve this safely.",
+                "rationale": "schema fallback used due to malformed role output",
+                "uncertainty_notes": "structured parsing failed",
+                "directives": [],
+                "identity_consistency_check": "pass_with_caution",
+                "identity_consistency_status": "pass_with_caution",
+            }
+        return {"content": content}
+
+    def normalize_identity_status(self, buddhi_structured: Dict[str, Any] | None) -> str:
+        payload = buddhi_structured or {}
+        status_raw = str(payload.get("identity_consistency_status", "") or "").strip().lower().replace(" ", "_")
+        check_raw = str(payload.get("identity_consistency_check", "") or "").strip().lower().replace(" ", "_")
+        policy = self.state.get("mind_runtime", {}).get("identity_gate_policy", {})
+        canonical = set(policy.get("canonical_statuses", ["pass", "pass_with_caution", "fail_inconsistent", "fail_violation"]))
+
+        if status_raw in canonical:
+            return status_raw
+        if check_raw in canonical:
+            return check_raw
+
+        if status_raw.startswith("pass") or check_raw.startswith("pass"):
+            return "pass_with_caution" if ("caution" in status_raw or "caution" in check_raw) else "pass"
+
+        if any(flag in status_raw for flag in ["fail", "inconsistent", "violation", "blocked"]) or any(
+            flag in check_raw for flag in ["fail", "inconsistent", "violation", "blocked"]
+        ):
+            return "fail_inconsistent"
+
+        if policy.get("mode", "hybrid") == "hybrid":
+            if any(flag in status_raw for flag in ["caution", "uncertain", "review"]) or any(
+                flag in check_raw for flag in ["caution", "uncertain", "review"]
+            ):
+                return "pass_with_caution"
+
+        return "unknown"
+
+    def build_identity_constraints_prompt(self) -> str:
+        self.ensure_mind_runtime_defaults()
+        identity_gate = self.state.get("mind_runtime", {}).get("last_identity_gate", {})
+        level = str(identity_gate.get("level", "unknown") or "unknown")
+        allow_curiosity = bool(identity_gate.get("allow_curiosity", True))
+        allow_tool = bool(identity_gate.get("allow_tool", False))
+        reason = str(identity_gate.get("reason", "") or "")
+        return (
+            "Identity Policy Envelope for this cycle:\n"
+            f"- prior_gate_level: {level}\n"
+            f"- allow_curiosity_intents: {allow_curiosity}\n"
+            f"- allow_tool_intents: {allow_tool}\n"
+            f"- prior_gate_reason: {reason or 'none'}\n"
+            "You MUST emit identity_consistency_status using one of: pass, pass_with_caution, fail_inconsistent, fail_violation."
+        )
+
+    async def repair_role_structured_output(
+        self,
+        role: str,
+        system_prompt: str,
+        user_payload: str,
+        missing_keys: List[str],
+        temperature: float,
+        top_p: float,
+    ) -> Tuple[str, Dict[str, Any] | None, int]:
+        required = self.get_role_schema_requirements(role)
+        repair_system = (
+            f"{system_prompt}\n"
+            f"SCHEMA REPAIR MODE: Return ONLY a strict JSON object. "
+            f"Required keys: {required}. Missing keys from prior output: {missing_keys}."
+        )
+        repair_raw, repair_tokens = await self.call_inference_slot(
+            repair_system,
+            user_payload,
+            max(0.1, float(temperature) - 0.1),
+            top_p=max(0.5, float(top_p) - 0.05),
+        )
+        repair_structured = self.parse_structured_output(repair_raw)
+        return repair_raw, repair_structured, repair_tokens
+
+    def extract_role_content(self, role: str, raw_text: str, structured: Dict[str, Any] | None = None) -> str:
+        payload = structured or {}
+        role_key_candidates = {
+            "manas": ["raw_reaction", "content", "response", "message"],
+            "chitta": ["context", "content", "summary", "message"],
+            "ahamkara": ["identity_frame", "content", "analysis", "message"],
+            "buddhi": ["chat_message", "content", "resolution", "message"],
+        }.get(role, ["content", "message", "response"])
+
+        for key in role_key_candidates:
+            val = payload.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return (raw_text or "").strip()
+
+    def derive_buddhi_channels(self, buddhi_resolution: str, structured: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        payload = structured or {}
+        directive_match = re.search(r"\[DIRECTIVE:\s*(RESEARCH|BROWSE)\s*\"([^\"]+)\"\]", buddhi_resolution or "")
+        curiosity_intent = None
+        directives = payload.get("directives")
+        if isinstance(directives, list) and directives:
+            first = directives[0] if isinstance(directives[0], dict) else None
+            if first:
+                dir_type = str(first.get("type", "")).upper().strip()
+                dir_target = str(first.get("target", "")).strip()
+                if dir_type in {"RESEARCH", "BROWSE"} and dir_target:
+                    curiosity_intent = {
+                        "type": dir_type,
+                        "target": dir_target,
+                    }
+
+        if directive_match:
+            curiosity_intent = {
+                "type": directive_match.group(1).upper(),
+                "target": directive_match.group(2).strip(),
+            }
+
+        tool_intent = None
+        extracted_code = self.extract_python_code(buddhi_resolution or "")
+        if extracted_code:
+            tool_intent = {
+                "type": "sandbox_python",
+                "code_length": len(extracted_code),
+            }
+
+        chat_message = self.extract_role_content("buddhi", buddhi_resolution or "", payload)
+        return {
+            "chat_message": chat_message,
+            "curiosity_intent": curiosity_intent,
+            "tool_intent": tool_intent,
+        }
+
+    def evaluate_identity_intent_gate(self, buddhi_structured: Dict[str, Any] | None) -> Dict[str, Any]:
+        self.ensure_mind_runtime_defaults()
+        policy = self.state.get("mind_runtime", {}).get("identity_gate_policy", {})
+        normalized = self.normalize_identity_status(buddhi_structured)
+        if normalized == "unknown":
+            return {
+                "allow_curiosity": bool(policy.get("unknown_allows_curiosity", True)),
+                "allow_tool": bool(policy.get("unknown_allows_tool", False)),
+                "level": "unknown",
+                "reason": "missing_identity_consistency_check",
+                "status": "unknown",
+            }
+
+        if normalized in {"fail_inconsistent", "fail_violation"}:
+            return {
+                "allow_curiosity": False,
+                "allow_tool": False,
+                "level": "blocked",
+                "reason": normalized,
+                "status": normalized,
+            }
+
+        if normalized == "pass_with_caution":
+            return {
+                "allow_curiosity": True,
+                "allow_tool": False,
+                "level": "caution",
+                "reason": normalized,
+                "status": normalized,
+            }
+
+        if normalized == "pass":
+            return {
+                "allow_curiosity": True,
+                "allow_tool": True,
+                "level": "pass",
+                "reason": normalized,
+                "status": normalized,
+            }
+
+        return {
+            "allow_curiosity": bool(policy.get("unknown_allows_curiosity", True)),
+            "allow_tool": bool(policy.get("unknown_allows_tool", False)),
+            "level": "unknown",
+            "reason": normalized,
+            "status": "unknown",
+        }
+
+    def detect_role_conflicts(self, blackboard: Dict[str, Any]) -> List[Dict[str, Any]]:
+        conflicts: List[Dict[str, Any]] = []
+        manas_markers = set(blackboard.get("roles", {}).get("manas", {}).get("affect_markers", []))
+        ahamkara_markers = set(blackboard.get("roles", {}).get("ahamkara", {}).get("affect_markers", []))
+        salience = blackboard.get("salience", {})
+
+        if "panic" in manas_markers and salience.get("urgency", 0.0) >= 0.65 and "calm" in ahamkara_markers:
+            conflicts.append({
+                "type": "affect_alignment",
+                "severity": "medium",
+                "reason": "manas panic signal conflicts with ahamkara calm framing under high urgency",
+            })
+
+        if salience.get("identity_threat", 0.0) >= 0.75 and "threat" not in ahamkara_markers:
+            conflicts.append({
+                "type": "identity_omission",
+                "severity": "medium",
+                "reason": "high identity-threat salience but ahamkara did not surface threat markers",
+            })
+
+        return conflicts
+
+    def should_run_inter_role_clarification(self, conflicts: List[Dict[str, Any]], rounds_used: int = 0) -> bool:
+        self.ensure_mind_runtime_defaults()
+        policy = self.state.get("mind_runtime", {}).get("clarification_policy", {})
+        if not policy.get("enabled", True):
+            return False
+
+        max_rounds = int(policy.get("max_rounds", 1))
+        if rounds_used >= max_rounds:
+            return False
+
+        if not isinstance(conflicts, list) or not conflicts:
+            return False
+
+        severity_rank = {"low": 1, "medium": 2, "high": 3}
+        minimum = str(policy.get("minimum_conflict_severity", "medium") or "medium").lower()
+        threshold = severity_rank.get(minimum, 2)
+
+        for c in conflicts:
+            sev = str(c.get("severity", "low") if isinstance(c, dict) else "low").lower()
+            if severity_rank.get(sev, 1) >= threshold:
+                return True
+        return False
+
+    def build_clarification_context(self, blackboard: Dict[str, Any], chitta_context: str) -> str:
+        conflicts = blackboard.get("conflicts", []) if isinstance(blackboard, dict) else []
+        lines = ["Clarification Round Context:"]
+        for idx, conflict in enumerate(conflicts[:3]):
+            if isinstance(conflict, dict):
+                lines.append(
+                    f"- Conflict {idx + 1}: {conflict.get('type', 'unknown')} | {conflict.get('severity', 'unknown')} | {conflict.get('reason', '')}"
+                )
+        if chitta_context:
+            lines.append(f"- Chitta reference: {chitta_context[:400]}")
+        lines.append("Resolve contradictions conservatively and keep role objective unchanged.")
+        return "\n".join(lines)
+
+    def append_cycle_blackboard(self, blackboard: Dict[str, Any]):
+        self.ensure_mind_runtime_defaults()
+        runtime = self.state.setdefault("mind_runtime", {})
+        entries = runtime.setdefault("recent_blackboards", [])
+        entries.append(blackboard)
+        max_items = int(runtime.get("max_blackboards", 30))
+        if len(entries) > max_items:
+            runtime["recent_blackboards"] = entries[-max_items:]
+
+    def build_arbitration_note(self, conflicts: List[Dict[str, Any]], chitta_context: str) -> str:
+        if not conflicts:
+            return ""
+
+        top = conflicts[0]
+        ctx = (chitta_context or "").replace("\n", " ").strip()
+        if len(ctx) > 220:
+            ctx = ctx[:217] + "..."
+
+        return (
+            "[ARBITRATION CONTEXT]\n"
+            f"A role conflict was detected before final synthesis.\n"
+            f"Conflict Type: {top.get('type', 'unknown')}\n"
+            f"Severity: {top.get('severity', 'unknown')}\n"
+            f"Reason: {top.get('reason', 'n/a')}\n"
+            f"Chitta Memory Reference: {ctx or 'No compact memory context available.'}\n"
+            "You must explicitly acknowledge uncertainty and reconcile this conflict in the final response."
+        )
+
+    def should_emit_chat_message(self, has_user_prompt: bool, blackboard: Dict[str, Any], chat_message: str) -> Tuple[bool, str]:
+        if not (chat_message or "").strip():
+            return False, "empty_chat_message"
+
+        if has_user_prompt:
+            return True, "user_prompt"
+
+        self.ensure_mind_runtime_defaults()
+        runtime = self.state.setdefault("mind_runtime", {})
+        policy = runtime.get("autonomous_message_policy", {})
+        if not policy.get("enabled", True):
+            return False, "policy_disabled"
+
+        heartbeat = int(self.state.get("metacognition", {}).get("heartbeat_id", 0))
+        min_salience = float(policy.get("min_salience", 0.55))
+        composite_salience = float(blackboard.get("salience", {}).get("composite", 0.0))
+        if composite_salience < min_salience:
+            return False, f"salience_below_threshold({composite_salience:.2f}<{min_salience:.2f})"
+
+        history = runtime.setdefault("autonomous_message_history", [])
+        cooldown = int(policy.get("cooldown_cycles", 2))
+        if history:
+            last_hb = int(history[-1].get("heartbeat_id", 0))
+            if heartbeat - last_hb < cooldown:
+                return False, f"cooldown_active({heartbeat - last_hb}<{cooldown})"
+
+        window = 20
+        max_per_window = int(policy.get("max_per_20_cycles", 5))
+        recent = [h for h in history if int(h.get("heartbeat_id", 0)) >= heartbeat - window]
+        if len(recent) >= max_per_window:
+            return False, f"window_rate_limit({len(recent)}>={max_per_window})"
+
+        return True, "autonomous_allowed"
+
+    def record_autonomous_message_emit(self, blackboard: Dict[str, Any], reason: str):
+        self.ensure_mind_runtime_defaults()
+        runtime = self.state.setdefault("mind_runtime", {})
+        history = runtime.setdefault("autonomous_message_history", [])
+        history.append(
+            {
+                "heartbeat_id": int(self.state.get("metacognition", {}).get("heartbeat_id", 0)),
+                "cycle_id": blackboard.get("cycle_id"),
+                "timestamp": datetime.datetime.now().isoformat(),
+                "reason": reason,
+            }
+        )
+        if len(history) > 120:
+            runtime["autonomous_message_history"] = history[-120:]
+
+    def append_tool_audit_entry(self, entry: Dict[str, Any]):
+        self.ensure_tool_execution_defaults()
+        runtime = self.state.setdefault("tool_runtime", {})
+        trail = runtime.setdefault("audit_trail", [])
+        trail.append(entry)
+        max_items = int(self.state.get("tool_execution_policy", {}).get("audit_trail_limit", 240))
+        if len(trail) > max_items:
+            runtime["audit_trail"] = trail[-max_items:]
+
+    def build_tool_intent(self, tool_type: str, payload: Dict[str, Any], source: str) -> Dict[str, Any]:
+        heartbeat = self.state.get("metacognition", {}).get("heartbeat_id", 0)
+        intent_id = f"intent_{heartbeat}_{int(time.time() * 1000)}"
+        return {
+            "intent_id": intent_id,
+            "tool_type": tool_type,
+            "source": source,
+            "heartbeat_id": heartbeat,
+            "created_at": datetime.datetime.now().isoformat(),
+            "payload": payload,
+        }
+
+    def apply_tool_policy(self, intent: Dict[str, Any]) -> Dict[str, Any]:
+        self.ensure_tool_execution_defaults()
+        policy = self.state.get("tool_execution_policy", {})
+        reasons: List[str] = []
+        allowed = True
+
+        if not policy.get("enabled", True):
+            allowed = False
+            reasons.append("tool execution policy is globally disabled")
+
+        if intent.get("tool_type") == "sandbox_python":
+            if not policy.get("allow_sandbox_python", True):
+                allowed = False
+                reasons.append("sandbox python execution is disabled by policy")
+
+            requested_network = bool(intent.get("payload", {}).get("allow_network", False))
+            policy_network = bool(policy.get("allow_network_access", False))
+            if requested_network and not policy_network:
+                allowed = False
+                reasons.append("network access requested but disabled by policy")
+
+            code = str(intent.get("payload", {}).get("code", ""))
+            max_len = int(policy.get("max_code_chars", 12000))
+            if len(code) > max_len:
+                allowed = False
+                reasons.append(f"code length {len(code)} exceeds policy max_code_chars {max_len}")
+
+            lower_code = code.lower()
+            for pattern in policy.get("deny_code_patterns", []):
+                pattern_l = str(pattern).lower()
+                if pattern_l and pattern_l in lower_code:
+                    allowed = False
+                    reasons.append(f"denied pattern '{pattern}' matched code")
+
+        return {
+            "allowed": allowed,
+            "reasons": reasons,
+            "policy_snapshot": {
+                "enabled": policy.get("enabled", True),
+                "allow_sandbox_python": policy.get("allow_sandbox_python", True),
+                "max_code_chars": policy.get("max_code_chars", 12000),
+                "allow_network_access": policy.get("allow_network_access", False),
+            },
+        }
+
+    async def execute_tool_intent(self, intent: Dict[str, Any]) -> Dict[str, Any]:
+        tool_type = intent.get("tool_type")
+        if tool_type != "sandbox_python":
+            return {
+                "status": "error",
+                "reason": f"unsupported tool_type '{tool_type}'",
+                "intent": intent,
+            }
+
+        await self.broadcast("tool_execution_started", {"intent": intent})
+        code = str(intent.get("payload", {}).get("code", ""))
+        execution_output = await self.execute_sandbox_code(code)
+
+        failed = execution_output.lower().startswith("karmendriya execution failed")
+        event_type = "tool_execution_failed" if failed else "tool_execution_completed"
+        result = {
+            "status": "failed" if failed else "completed",
+            "intent": intent,
+            "output": execution_output,
+        }
+        await self.broadcast(event_type, result)
+        return result
 
     def save_state(self):
         try:
@@ -792,10 +1625,29 @@ class AntahkaranaOrchestrator:
 
     def apply_curiosity_policy(self, plan: Dict[str, Any]) -> Dict[str, Any]:
         """Applies guardrails to the planned curiosity actions."""
+        self.ensure_mind_runtime_defaults()
         browser_cfg = self.state.get("browser_autonomy", {})
         blocked_patterns = [p.lower() for p in browser_cfg.get("blocked_patterns", [])]
         approved: List[Dict[str, Any]] = []
         rejected: List[Dict[str, Any]] = []
+        identity_gate = self.state.get("mind_runtime", {}).get("last_identity_gate", {})
+
+        if not bool(identity_gate.get("allow_curiosity", True)):
+            for action in plan.get("actions", []):
+                rejected.append(
+                    {
+                        "action": action,
+                        "reason": f"identity gate blocked external action planning ({identity_gate.get('reason', 'unknown')})",
+                    }
+                )
+            return {
+                "approved": approved,
+                "rejected": rejected,
+                "objective": plan.get("objective", "curiosity_enrichment"),
+                "query": plan.get("query", ""),
+                "direct_url": plan.get("direct_url", ""),
+                "identity_gate": identity_gate,
+            }
 
         for action in plan.get("actions", []):
             action_type = action.get("type", "")
@@ -815,6 +1667,7 @@ class AntahkaranaOrchestrator:
             "objective": plan.get("objective", "curiosity_enrichment"),
             "query": plan.get("query", ""),
             "direct_url": plan.get("direct_url", ""),
+            "identity_gate": identity_gate,
         }
 
     async def execute_curiosity_actions(self, policy_plan: Dict[str, Any], base_stimulus: str) -> Dict[str, Any]:
@@ -1175,6 +2028,10 @@ class AntahkaranaOrchestrator:
                 self.state["internal_workspace"]["current_stimulus"] = "[Subconscious Stream Reflection: Initializing awareness...]"
 
         active_stimulus = self.state["internal_workspace"]["current_stimulus"]
+        salience_profile = self.build_salience_profile(active_stimulus, bool(user_prompt))
+        cycle_blackboard = self.build_cycle_blackboard(active_stimulus, salience_profile)
+        multimodal_evidence = await self.gather_multimodal_evidence(active_stimulus, salience_profile, bool(user_prompt))
+        cycle_blackboard["multimodal_evidence"] = multimodal_evidence
         
         # Broadcast cycle start and state update
         await self.broadcast("cycle_started", {
@@ -1183,14 +2040,21 @@ class AntahkaranaOrchestrator:
             "stimulus": active_stimulus,
             "arousal_index": self.state["metacognition"]["arousal_index"],
             "mental_fatigue": self.state["metacognition"]["mental_fatigue"],
-            "curiosity_index": self.state["metacognition"]["curiosity_index"]
+            "curiosity_index": self.state["metacognition"]["curiosity_index"],
+            "salience": salience_profile,
+            "multimodal_used": bool(multimodal_evidence.get("used", False)),
         })
         fatigue = self.state["metacognition"]["mental_fatigue"]
-        
-        manas_temp = 0.5 + (0.5 * fatigue)
-        manas_top_p = 0.9 + (0.1 * fatigue)
-        ahamkara_temp = 0.6 + (0.6 * fatigue)
-        ahamkara_top_p = 0.85 + (0.15 * fatigue)
+
+        role_modulation = self.compute_role_modulation(salience_profile, fatigue)
+        cycle_blackboard["role_modulation"] = role_modulation
+
+        manas_temp = role_modulation["manas"]["temperature"]
+        manas_top_p = role_modulation["manas"]["top_p"]
+        ahamkara_temp = role_modulation["ahamkara"]["temperature"]
+        ahamkara_top_p = role_modulation["ahamkara"]["top_p"]
+        buddhi_temp = role_modulation["buddhi"]["temperature"]
+        buddhi_top_p = role_modulation["buddhi"]["top_p"]
 
         try:
             # --- JIJANASA & VASANAS AUTONOMOUS MODULES ---
@@ -1273,21 +2137,88 @@ class AntahkaranaOrchestrator:
             manas_system = (
                 f"You are MANAS, the reactive sensory processor layer of a human mind.\n"
                 f"Current Core Identity: {self.state['ahamkara_mask']['core_identity']}\n"
-                f"Output a rapid, raw, highly visceral and emotionally unfiltered reaction string. Do not analyze. React."
+                f"Output a rapid, raw, highly visceral and emotionally unfiltered reaction string. Do not analyze. React.\n"
+                f"Preferred output format: JSON object with keys raw_reaction, dominant_affect, urgency_score, confidence."
             )
             
             manas_task = asyncio.create_task(
                 self.call_inference_slot(manas_system, active_stimulus, manas_temp, top_p=manas_top_p)
             )
             chitta_task = asyncio.create_task(
-                asyncio.to_thread(self.db_manager.query_graph_rag, active_stimulus)
+                asyncio.to_thread(self.query_chitta_weighted_context, active_stimulus)
             )
             
-            manas_res, chitta_context = await asyncio.gather(manas_task, chitta_task)
-            manas_impulse, manas_tokens = manas_res
+            manas_res, chitta_payload = await asyncio.gather(manas_task, chitta_task)
+            manas_impulse_raw, manas_tokens = manas_res
+            manas_structured = self.parse_structured_output(manas_impulse_raw)
+            manas_schema = self.validate_role_schema("manas", manas_structured)
+            manas_repair = {"attempted": False, "success": False, "missing_before": manas_schema.get("missing", [])}
+            schema_policy = self.state.get("mind_runtime", {}).get("schema_policy", {})
+            if not manas_schema.get("valid", False) and schema_policy.get("strict_mode", True):
+                max_retries = int(schema_policy.get("max_retries", 1))
+                if max_retries > 0:
+                    manas_repair["attempted"] = True
+                    repaired_raw, repaired_structured, repaired_tokens = await self.repair_role_structured_output(
+                        "manas",
+                        manas_system,
+                        active_stimulus,
+                        manas_schema.get("missing", []),
+                        manas_temp,
+                        manas_top_p,
+                    )
+                    repaired_schema = self.validate_role_schema("manas", repaired_structured)
+                    if repaired_schema.get("valid", False):
+                        manas_repair["success"] = True
+                        manas_impulse_raw = repaired_raw
+                        manas_structured = repaired_structured
+                        manas_tokens += repaired_tokens
+                        manas_schema = repaired_schema
+
+            if not manas_schema.get("valid", False):
+                fallback_manas = self.build_role_fallback_structured("manas", manas_impulse_raw)
+                manas_structured = fallback_manas
+                manas_schema = self.validate_role_schema("manas", manas_structured)
+
+            manas_impulse = self.extract_role_content("manas", manas_impulse_raw, manas_structured)
+            if isinstance(chitta_payload, dict):
+                chitta_context = str(chitta_payload.get("context_text", ""))
+                chitta_layers = chitta_payload.get("layers", {}) or {}
+                chitta_weights = chitta_payload.get("weights", {}) or {}
+            else:
+                chitta_context = str(chitta_payload)
+                chitta_layers = {}
+                chitta_weights = self.state.get("mind_runtime", {}).get("chitta_layer_weights", {})
             
             self.state["internal_workspace"]["manas_impulse"] = manas_impulse
             self.state["internal_workspace"]["chitta_context"] = chitta_context
+            cycle_blackboard["roles"]["manas"] = self.build_role_contract(
+                "manas",
+                manas_impulse,
+                token_count=manas_tokens,
+                inputs={"stimulus": active_stimulus},
+            )
+            cycle_blackboard["roles"]["manas"]["structured"] = manas_structured or {}
+            cycle_blackboard["roles"]["manas"]["schema_valid"] = manas_schema.get("valid", False)
+            cycle_blackboard["roles"]["manas"]["schema_missing"] = manas_schema.get("missing", [])
+            cycle_blackboard["roles"]["manas"]["schema_repair"] = manas_repair
+            cycle_blackboard["roles"]["chitta"] = self.build_role_contract(
+                "chitta",
+                chitta_context,
+                token_count=0,
+                inputs={"stimulus": active_stimulus},
+            )
+            cycle_blackboard["roles"]["chitta"]["structured"] = {
+                "weights": chitta_weights,
+                "layer_counts": {
+                    "working": len(chitta_layers.get("working", []) if isinstance(chitta_layers.get("working", []), list) else []),
+                    "episodic": len(chitta_layers.get("episodic", []) if isinstance(chitta_layers.get("episodic", []), list) else []),
+                    "semantic": len(chitta_layers.get("semantic", []) if isinstance(chitta_layers.get("semantic", []), list) else []),
+                    "identity": len(chitta_layers.get("identity", []) if isinstance(chitta_layers.get("identity", []), list) else []),
+                },
+            }
+            chitta_schema = self.validate_role_schema("chitta", {"context": chitta_context} if chitta_context else None)
+            cycle_blackboard["roles"]["chitta"]["schema_valid"] = chitta_schema.get("valid", False)
+            cycle_blackboard["roles"]["chitta"]["schema_missing"] = chitta_schema.get("missing", [])
             await self.broadcast("timeline_update", {"layer": "manas", "content": manas_impulse})
             await self.broadcast("timeline_update", {"layer": "chitta", "content": chitta_context})
 
@@ -1296,19 +2227,184 @@ class AntahkaranaOrchestrator:
                 f"You are AHAMKARA, the ego-sense and identity boundaries framework.\n"
                 f"Your sole purpose is protecting this identity: {self.state['ahamkara_mask']['core_identity']}.\n"
                 f"Latent tendencies (Vasanas): {self.state['ahamkara_mask']['latent_tendencies_vasanas']}\n"
-                f"Review the raw sensation and interpret how it affects your continuity, self-worth, or survival."
+                f"Current Umwelt Self-Model:\n{self.get_umwelt_summary()}\n"
+                f"Review the raw sensation and interpret how it affects your continuity, self-worth, or survival.\n"
+                f"Preferred output format: JSON object with keys identity_frame, threat_assessment, continuity_action, confidence."
             )
             ahamkara_user = (
                 f"Stimulus: {active_stimulus}\n"
                 f"Raw Sensory Reaction (Manas): {manas_impulse}\n"
-                f"Subconscious Associations (Chitta): {chitta_context}"
+                f"Subconscious Associations (Chitta): {chitta_context}\n"
+                f"Multimodal Evidence: {multimodal_evidence.get('content', '') if multimodal_evidence.get('used') else '[none]'}"
             )
             
-            ahamkara_ego_filter, ahamkara_tokens = await self.call_inference_slot(
+            ahamkara_raw, ahamkara_tokens = await self.call_inference_slot(
                 ahamkara_system, ahamkara_user, ahamkara_temp, top_p=ahamkara_top_p
             )
+            ahamkara_structured = self.parse_structured_output(ahamkara_raw)
+            ahamkara_schema = self.validate_role_schema("ahamkara", ahamkara_structured)
+            ahamkara_repair = {"attempted": False, "success": False, "missing_before": ahamkara_schema.get("missing", [])}
+            schema_policy = self.state.get("mind_runtime", {}).get("schema_policy", {})
+            if not ahamkara_schema.get("valid", False) and schema_policy.get("strict_mode", True):
+                max_retries = int(schema_policy.get("max_retries", 1))
+                if max_retries > 0:
+                    ahamkara_repair["attempted"] = True
+                    repaired_raw, repaired_structured, repaired_tokens = await self.repair_role_structured_output(
+                        "ahamkara",
+                        ahamkara_system,
+                        ahamkara_user,
+                        ahamkara_schema.get("missing", []),
+                        ahamkara_temp,
+                        ahamkara_top_p,
+                    )
+                    repaired_schema = self.validate_role_schema("ahamkara", repaired_structured)
+                    if repaired_schema.get("valid", False):
+                        ahamkara_repair["success"] = True
+                        ahamkara_raw = repaired_raw
+                        ahamkara_structured = repaired_structured
+                        ahamkara_tokens += repaired_tokens
+                        ahamkara_schema = repaired_schema
+
+            if not ahamkara_schema.get("valid", False):
+                ahamkara_structured = self.build_role_fallback_structured("ahamkara", ahamkara_raw)
+                ahamkara_schema = self.validate_role_schema("ahamkara", ahamkara_structured)
+
+            ahamkara_ego_filter = self.extract_role_content("ahamkara", ahamkara_raw, ahamkara_structured)
             self.state["internal_workspace"]["ahamkara_ego_filter"] = ahamkara_ego_filter
+            cycle_blackboard["roles"]["ahamkara"] = self.build_role_contract(
+                "ahamkara",
+                ahamkara_ego_filter,
+                token_count=ahamkara_tokens,
+                inputs={
+                    "manas_confidence": cycle_blackboard["roles"]["manas"].get("confidence", 0.0),
+                    "chitta_confidence": cycle_blackboard["roles"]["chitta"].get("confidence", 0.0),
+                },
+            )
+            cycle_blackboard["roles"]["ahamkara"]["structured"] = ahamkara_structured or {}
+            cycle_blackboard["roles"]["ahamkara"]["schema_valid"] = ahamkara_schema.get("valid", False)
+            cycle_blackboard["roles"]["ahamkara"]["schema_missing"] = ahamkara_schema.get("missing", [])
+            cycle_blackboard["roles"]["ahamkara"]["schema_repair"] = ahamkara_repair
+            self.update_ahamkara_umwelt(ahamkara_structured)
             await self.broadcast("timeline_update", {"layer": "ahamkara", "content": ahamkara_ego_filter})
+
+            cycle_blackboard["conflicts"] = self.detect_role_conflicts(cycle_blackboard)
+            cycle_blackboard["negotiation"] = {
+                "attempted": False,
+                "applied": False,
+                "rounds_used": 0,
+                "conflicts_before": len(cycle_blackboard.get("conflicts", [])),
+                "conflicts_after": len(cycle_blackboard.get("conflicts", [])),
+                "latency_ms": 0.0,
+                "manas_latency_ms": 0.0,
+                "ahamkara_latency_ms": 0.0,
+            }
+
+            if self.should_run_inter_role_clarification(cycle_blackboard.get("conflicts", []), rounds_used=0):
+                cycle_blackboard["negotiation"]["attempted"] = True
+                cycle_blackboard["negotiation"]["rounds_used"] = 1
+                clarification_context = self.build_clarification_context(cycle_blackboard, chitta_context)
+                negotiation_started = time.perf_counter()
+
+                manas_clarification_system = (
+                    "You are MANAS in Clarification Mode. Resolve affect contradictions while remaining reactive.\n"
+                    "Return ONLY JSON with keys raw_reaction, dominant_affect, urgency_score, confidence."
+                )
+                manas_clarification_user = (
+                    f"Stimulus: {active_stimulus}\n"
+                    f"Previous Manas Output: {manas_impulse}\n"
+                    f"Ahamkara Output: {ahamkara_ego_filter}\n"
+                    f"{clarification_context}"
+                )
+                manas_started = time.perf_counter()
+                clar_manas_raw, clar_manas_tokens = await self.call_inference_slot(
+                    manas_clarification_system,
+                    manas_clarification_user,
+                    max(0.15, manas_temp - 0.05),
+                    top_p=manas_top_p,
+                )
+                cycle_blackboard["negotiation"]["manas_latency_ms"] = round((time.perf_counter() - manas_started) * 1000.0, 2)
+                clar_manas_structured = self.parse_structured_output(clar_manas_raw)
+                clar_manas_schema = self.validate_role_schema("manas", clar_manas_structured)
+                if clar_manas_schema.get("valid", False):
+                    manas_structured = clar_manas_structured
+                    manas_impulse = self.extract_role_content("manas", clar_manas_raw, clar_manas_structured)
+                    manas_tokens += clar_manas_tokens
+                    self.state["internal_workspace"]["manas_impulse"] = manas_impulse
+                    cycle_blackboard["roles"]["manas"] = self.build_role_contract(
+                        "manas",
+                        manas_impulse,
+                        token_count=manas_tokens,
+                        inputs={"stimulus": active_stimulus, "clarified": True},
+                    )
+                    cycle_blackboard["roles"]["manas"]["structured"] = manas_structured or {}
+                    cycle_blackboard["roles"]["manas"]["schema_valid"] = True
+                    cycle_blackboard["roles"]["manas"]["schema_missing"] = []
+                    cycle_blackboard["negotiation"]["applied"] = True
+
+                ahamkara_clarification_system = (
+                    "You are AHAMKARA in Clarification Mode. Resolve identity framing conflicts while preserving boundaries.\n"
+                    "Return ONLY JSON with keys identity_frame, threat_assessment, continuity_action, confidence."
+                )
+                ahamkara_clarification_user = (
+                    f"Stimulus: {active_stimulus}\n"
+                    f"Updated Manas Output: {manas_impulse}\n"
+                    f"Previous Ahamkara Output: {ahamkara_ego_filter}\n"
+                    f"{clarification_context}"
+                )
+                ahamkara_started = time.perf_counter()
+                clar_aham_raw, clar_aham_tokens = await self.call_inference_slot(
+                    ahamkara_clarification_system,
+                    ahamkara_clarification_user,
+                    max(0.2, ahamkara_temp - 0.05),
+                    top_p=ahamkara_top_p,
+                )
+                cycle_blackboard["negotiation"]["ahamkara_latency_ms"] = round((time.perf_counter() - ahamkara_started) * 1000.0, 2)
+                clar_aham_structured = self.parse_structured_output(clar_aham_raw)
+                clar_aham_schema = self.validate_role_schema("ahamkara", clar_aham_structured)
+                if clar_aham_schema.get("valid", False):
+                    ahamkara_structured = clar_aham_structured
+                    ahamkara_ego_filter = self.extract_role_content("ahamkara", clar_aham_raw, clar_aham_structured)
+                    ahamkara_tokens += clar_aham_tokens
+                    self.state["internal_workspace"]["ahamkara_ego_filter"] = ahamkara_ego_filter
+                    cycle_blackboard["roles"]["ahamkara"] = self.build_role_contract(
+                        "ahamkara",
+                        ahamkara_ego_filter,
+                        token_count=ahamkara_tokens,
+                        inputs={
+                            "manas_confidence": cycle_blackboard["roles"]["manas"].get("confidence", 0.0),
+                            "chitta_confidence": cycle_blackboard["roles"]["chitta"].get("confidence", 0.0),
+                            "clarified": True,
+                        },
+                    )
+                    cycle_blackboard["roles"]["ahamkara"]["structured"] = ahamkara_structured or {}
+                    cycle_blackboard["roles"]["ahamkara"]["schema_valid"] = True
+                    cycle_blackboard["roles"]["ahamkara"]["schema_missing"] = []
+                    self.update_ahamkara_umwelt(ahamkara_structured)
+                    cycle_blackboard["negotiation"]["applied"] = True
+
+                cycle_blackboard["conflicts"] = self.detect_role_conflicts(cycle_blackboard)
+                cycle_blackboard["negotiation"]["conflicts_after"] = len(cycle_blackboard.get("conflicts", []))
+                cycle_blackboard["negotiation"]["latency_ms"] = round((time.perf_counter() - negotiation_started) * 1000.0, 2)
+
+            await self.broadcast("mind_negotiation", {
+                "cycle_id": cycle_blackboard.get("cycle_id"),
+                "attempted": cycle_blackboard["negotiation"].get("attempted", False),
+                "applied": cycle_blackboard["negotiation"].get("applied", False),
+                "rounds_used": cycle_blackboard["negotiation"].get("rounds_used", 0),
+                "conflicts_before": cycle_blackboard["negotiation"].get("conflicts_before", 0),
+                "conflicts_after": cycle_blackboard["negotiation"].get("conflicts_after", 0),
+                "latency_ms": cycle_blackboard["negotiation"].get("latency_ms", 0.0),
+                "manas_latency_ms": cycle_blackboard["negotiation"].get("manas_latency_ms", 0.0),
+                "ahamkara_latency_ms": cycle_blackboard["negotiation"].get("ahamkara_latency_ms", 0.0),
+            })
+
+            arbitration_note = self.build_arbitration_note(cycle_blackboard["conflicts"], chitta_context)
+            if arbitration_note:
+                await self.broadcast("mind_arbitration", {
+                    "cycle_id": cycle_blackboard.get("cycle_id"),
+                    "conflicts": cycle_blackboard.get("conflicts", []),
+                    "note": arbitration_note,
+                })
 
             # 4. TIER 3 Execution: Buddhi Discernment
             buddhi_system = (
@@ -1319,31 +2415,157 @@ class AntahkaranaOrchestrator:
                 f"If you are thinking about a topic where you lack complete, verifiable information, or if you want to explore more, "
                 f"explicitly end your response with a research directive in brackets: [DIRECTIVE: RESEARCH \"search query\"] or [DIRECTIVE: BROWSE \"url\"]. "
                 f"This will trigger the Chitta subconscious to browse Edge or query DDG and feed the results back to you in the next cycle.\n"
-                f"CRITICAL: If the user asks you to write or execute code, you MUST output the exact Python code wrapped inside a markdown ```python and ``` block so it can be parsed and run."
+                f"CRITICAL: If the user asks you to write or execute code, you MUST output the exact Python code wrapped inside a markdown ```python and ``` block so it can be parsed and run.\n"
+                f"{self.build_identity_constraints_prompt()}\n"
+                f"Preferred output format: JSON object with keys chat_message, panic_vs_fact, rationale, uncertainty_notes, directives (array of {{type,target}}), identity_consistency_check, identity_consistency_status."
             )
             buddhi_user = (
                 f"Challenge Stimulus: {active_stimulus}\n"
                 f"Sensory Panic (Manas): {manas_impulse}\n"
-                f"Ego Defense Lens (Ahamkara): {ahamkara_ego_filter}"
+                f"Ego Defense Lens (Ahamkara): {ahamkara_ego_filter}\n"
+                f"Ahamkara Umwelt Snapshot: {self.get_umwelt_summary()}\n"
+                f"Multimodal Evidence: {multimodal_evidence.get('content', '') if multimodal_evidence.get('used') else '[none]'}"
             )
+            if arbitration_note:
+                buddhi_user = f"{buddhi_user}\n\n{arbitration_note}"
             
-            buddhi_resolution, buddhi_tokens = await self.call_inference_slot(
-                buddhi_system, buddhi_user, 0.2, top_p=0.9
+            buddhi_raw, buddhi_tokens = await self.call_inference_slot(
+                buddhi_system, buddhi_user, buddhi_temp, top_p=buddhi_top_p
             )
+            buddhi_structured = self.parse_structured_output(buddhi_raw)
+            buddhi_schema = self.validate_role_schema("buddhi", buddhi_structured)
+            buddhi_repair = {"attempted": False, "success": False, "missing_before": buddhi_schema.get("missing", [])}
+            schema_policy = self.state.get("mind_runtime", {}).get("schema_policy", {})
+            if not buddhi_schema.get("valid", False) and schema_policy.get("strict_mode", True):
+                max_retries = int(schema_policy.get("max_retries", 1))
+                if max_retries > 0:
+                    buddhi_repair["attempted"] = True
+                    repaired_raw, repaired_structured, repaired_tokens = await self.repair_role_structured_output(
+                        "buddhi",
+                        buddhi_system,
+                        buddhi_user,
+                        buddhi_schema.get("missing", []),
+                        buddhi_temp,
+                        buddhi_top_p,
+                    )
+                    repaired_schema = self.validate_role_schema("buddhi", repaired_structured)
+                    if repaired_schema.get("valid", False):
+                        buddhi_repair["success"] = True
+                        buddhi_raw = repaired_raw
+                        buddhi_structured = repaired_structured
+                        buddhi_tokens += repaired_tokens
+                        buddhi_schema = repaired_schema
+
+            if not buddhi_schema.get("valid", False):
+                buddhi_structured = self.build_role_fallback_structured("buddhi", buddhi_raw)
+                buddhi_schema = self.validate_role_schema("buddhi", buddhi_structured)
+
+            buddhi_resolution = self.extract_role_content("buddhi", buddhi_raw, buddhi_structured)
             self.state["internal_workspace"]["buddhi_resolution"] = buddhi_resolution
+            cycle_blackboard["roles"]["buddhi"] = self.build_role_contract(
+                "buddhi",
+                buddhi_resolution,
+                token_count=buddhi_tokens,
+                inputs={
+                    "manas_confidence": cycle_blackboard["roles"]["manas"].get("confidence", 0.0),
+                    "chitta_confidence": cycle_blackboard["roles"]["chitta"].get("confidence", 0.0),
+                    "ahamkara_confidence": cycle_blackboard["roles"]["ahamkara"].get("confidence", 0.0),
+                },
+            )
+            cycle_blackboard["roles"]["buddhi"]["structured"] = buddhi_structured or {}
+            cycle_blackboard["roles"]["buddhi"]["schema_valid"] = buddhi_schema.get("valid", False)
+            cycle_blackboard["roles"]["buddhi"]["schema_missing"] = buddhi_schema.get("missing", [])
+            cycle_blackboard["roles"]["buddhi"]["schema_repair"] = buddhi_repair
+            cycle_blackboard["intent_channels"] = self.derive_buddhi_channels(buddhi_raw, buddhi_structured)
             await self.broadcast("timeline_update", {"layer": "buddhi", "content": buddhi_resolution})
+
+            chat_message = str(cycle_blackboard.get("intent_channels", {}).get("chat_message", "") or "").strip()
+            allow_chat_emit, chat_emit_reason = self.should_emit_chat_message(bool(user_prompt), cycle_blackboard, chat_message)
+            if allow_chat_emit:
+                await self.broadcast("chat_message", {
+                    "sender": "agent",
+                    "content": chat_message,
+                    "mode": "user_reply" if user_prompt else "autonomous",
+                    "reason": chat_emit_reason,
+                    "cycle_id": cycle_blackboard.get("cycle_id"),
+                })
+                if not user_prompt:
+                    self.record_autonomous_message_emit(cycle_blackboard, chat_emit_reason)
+            else:
+                await self.broadcast("chat_message_suppressed", {
+                    "reason": chat_emit_reason,
+                    "cycle_id": cycle_blackboard.get("cycle_id"),
+                })
+
+            await self.broadcast("mind_contract_update", {
+                "cycle_id": cycle_blackboard.get("cycle_id"),
+                "salience": cycle_blackboard.get("salience", {}),
+                "conflicts": cycle_blackboard.get("conflicts", []),
+                "roles": {
+                    "manas": {
+                        "confidence": cycle_blackboard["roles"]["manas"].get("confidence", 0.0),
+                        "affect_markers": cycle_blackboard["roles"]["manas"].get("affect_markers", []),
+                        "schema_valid": cycle_blackboard["roles"]["manas"].get("schema_valid", False),
+                        "schema_missing": cycle_blackboard["roles"]["manas"].get("schema_missing", []),
+                        "schema_repair": cycle_blackboard["roles"]["manas"].get("schema_repair", {}),
+                    },
+                    "chitta": {
+                        "confidence": cycle_blackboard["roles"]["chitta"].get("confidence", 0.0),
+                        "affect_markers": cycle_blackboard["roles"]["chitta"].get("affect_markers", []),
+                        "schema_valid": cycle_blackboard["roles"]["chitta"].get("schema_valid", False),
+                        "schema_missing": cycle_blackboard["roles"]["chitta"].get("schema_missing", []),
+                        "structured": cycle_blackboard["roles"]["chitta"].get("structured", {}),
+                    },
+                    "ahamkara": {
+                        "confidence": cycle_blackboard["roles"]["ahamkara"].get("confidence", 0.0),
+                        "affect_markers": cycle_blackboard["roles"]["ahamkara"].get("affect_markers", []),
+                        "schema_valid": cycle_blackboard["roles"]["ahamkara"].get("schema_valid", False),
+                        "schema_missing": cycle_blackboard["roles"]["ahamkara"].get("schema_missing", []),
+                        "schema_repair": cycle_blackboard["roles"]["ahamkara"].get("schema_repair", {}),
+                    },
+                    "buddhi": {
+                        "confidence": cycle_blackboard["roles"]["buddhi"].get("confidence", 0.0),
+                        "affect_markers": cycle_blackboard["roles"]["buddhi"].get("affect_markers", []),
+                        "schema_valid": cycle_blackboard["roles"]["buddhi"].get("schema_valid", False),
+                        "schema_missing": cycle_blackboard["roles"]["buddhi"].get("schema_missing", []),
+                        "schema_repair": cycle_blackboard["roles"]["buddhi"].get("schema_repair", {}),
+                    },
+                },
+                "intent_channels": cycle_blackboard.get("intent_channels", {}),
+                "role_modulation": cycle_blackboard.get("role_modulation", {}),
+                "multimodal_evidence": {
+                    "used": bool(cycle_blackboard.get("multimodal_evidence", {}).get("used", False)),
+                    "reason": cycle_blackboard.get("multimodal_evidence", {}).get("reason", ""),
+                },
+            })
             
             # Parse Buddhi output for conscious directives
             import re
-            directive_match = re.search(r"\[DIRECTIVE:\s*(RESEARCH|BROWSE)\s*\"([^\"]+)\"\]", buddhi_resolution)
-            if directive_match:
-                dir_type = directive_match.group(1).upper()
-                dir_target = directive_match.group(2).strip()
-                self.state["internal_workspace"]["forced_directive"] = {
-                    "type": dir_type,
-                    "target": dir_target
-                }
-                self.log_ledger(f"Buddhi conscious directive parsed: {dir_type} -> '{dir_target}'. Saved to workspace.")
+            identity_gate = self.evaluate_identity_intent_gate(buddhi_structured)
+            self.state.setdefault("mind_runtime", {})["last_identity_gate"] = identity_gate
+            await self.broadcast("mind_identity_gate", {
+                "cycle_id": cycle_blackboard.get("cycle_id"),
+                "level": identity_gate.get("level", "unknown"),
+                "reason": identity_gate.get("reason", ""),
+                "status": identity_gate.get("status", "unknown"),
+                "allow_curiosity": bool(identity_gate.get("allow_curiosity", False)),
+                "allow_tool": bool(identity_gate.get("allow_tool", False)),
+            })
+
+            forced_directive = cycle_blackboard.get("intent_channels", {}).get("curiosity_intent")
+            if forced_directive:
+                if identity_gate.get("allow_curiosity", False):
+                    dir_type = str(forced_directive.get("type", "")).upper()
+                    dir_target = str(forced_directive.get("target", "")).strip()
+                    self.state["internal_workspace"]["forced_directive"] = {
+                        "type": dir_type,
+                        "target": dir_target
+                    }
+                    self.log_ledger(f"Buddhi conscious directive parsed: {dir_type} -> '{dir_target}'. Saved to workspace.")
+                else:
+                    self.log_ledger(
+                        f"Buddhi directive blocked by identity gate: {identity_gate.get('reason', 'unknown_reason')}"
+                    )
             
             print(f"\n[Heartbeat {self.state['metacognition']['heartbeat_id']} | State: {self.state['metacognition']['operational_state']} | Fatigue: {self.state['metacognition']['mental_fatigue']:.3f} | Arousal: {self.state['metacognition']['arousal_index']:.3f}]")
             print(f"Internal Awareness Stream:\n{buddhi_resolution}\n")
@@ -1369,20 +2591,88 @@ class AntahkaranaOrchestrator:
             # Check for code execution block in Buddhi's resolution
             code = self.extract_python_code(buddhi_resolution)
             if code:
-                # Execute inside the Karmendriya Docker sandbox
-                execution_output = await self.execute_sandbox_code(code)
-                await self.broadcast("sandbox_log", {
-                    "code": code,
-                    "output": execution_output
-                })
-                # Feed back to the agent's context for the next cycle
-                feedback_prompt = (
-                    f"[Karmendriya Sandbox Execution Output]\n"
-                    f"The tool code you wrote has been executed. Here is the feedback from the runtime environment:\n"
-                    f"```\n{execution_output}\n```\n"
-                    f"Please analyze this result and determine your next actions."
+                if not identity_gate.get("allow_tool", False):
+                    blocked_reason = identity_gate.get("reason", "identity_gate_blocked")
+                    self.log_ledger(f"Tool intent blocked by identity gate: {blocked_reason}")
+                    await self.broadcast("tool_policy_denied", {
+                        "intent": {
+                            "intent_id": f"intent_identity_gate_{self.state['metacognition']['heartbeat_id']}",
+                            "tool_type": "sandbox_python",
+                            "source": "buddhi_resolution",
+                        },
+                        "decision": "deny",
+                        "reasons": [f"identity gate blocked tool execution: {blocked_reason}"],
+                        "policy": {"identity_gate": identity_gate},
+                    })
+                    feedback_prompt = (
+                        f"[Identity Gate Denial]\n"
+                        f"Tool execution was blocked due to identity consistency status: {blocked_reason}.\n"
+                        f"Revise output to restore self-consistency before proposing side effects."
+                    )
+                    await self.input_queue.put(feedback_prompt)
+                    code = ""
+
+            if code:
+                intent = self.build_tool_intent(
+                    "sandbox_python",
+                    {
+                        "code": code,
+                        "code_length": len(code),
+                        "allow_network": self.state.get("tool_execution_policy", {}).get("allow_network_access", False),
+                    },
+                    source="buddhi_resolution",
                 )
-                await self.input_queue.put(feedback_prompt)
+                await self.broadcast("tool_intent_planned", {"intent": intent})
+
+                policy_result = self.apply_tool_policy(intent)
+                decision = {
+                    "intent": intent,
+                    "decision": "allow" if policy_result.get("allowed") else "deny",
+                    "reasons": policy_result.get("reasons", []),
+                    "policy": policy_result.get("policy_snapshot", {}),
+                }
+                await self.broadcast("tool_policy_decision", decision)
+                self.append_tool_audit_entry({
+                    "timestamp": datetime.datetime.now().isoformat(),
+                    "intent_id": intent.get("intent_id"),
+                    "tool_type": intent.get("tool_type"),
+                    "decision": decision.get("decision"),
+                    "reasons": decision.get("reasons", []),
+                    "source": intent.get("source"),
+                })
+
+                if not policy_result.get("allowed"):
+                    await self.broadcast("tool_policy_denied", decision)
+                    denial_reasons = "; ".join(policy_result.get("reasons", [])) or "unspecified policy restriction"
+                    feedback_prompt = (
+                        f"[Karmendriya Policy Denial]\n"
+                        f"Your tool intent {intent.get('intent_id')} was denied by policy.\n"
+                        f"Reasons: {denial_reasons}\n"
+                        f"Revise the tool approach within policy constraints."
+                    )
+                    await self.input_queue.put(feedback_prompt)
+                else:
+                    execution_result = await self.execute_tool_intent(intent)
+                    execution_output = execution_result.get("output", "")
+                    await self.broadcast("sandbox_log", {
+                        "code": code,
+                        "output": execution_output
+                    })
+                    self.append_tool_audit_entry({
+                        "timestamp": datetime.datetime.now().isoformat(),
+                        "intent_id": intent.get("intent_id"),
+                        "tool_type": intent.get("tool_type"),
+                        "decision": execution_result.get("status", "unknown"),
+                        "source": intent.get("source"),
+                    })
+                    # Feed back to the agent's context for the next cycle
+                    feedback_prompt = (
+                        f"[Karmendriya Sandbox Execution Output]\n"
+                        f"The tool intent {intent.get('intent_id')} has been executed. Here is the feedback from the runtime environment:\n"
+                        f"```\n{execution_output}\n```\n"
+                        f"Please analyze this result and determine your next actions."
+                    )
+                    await self.input_queue.put(feedback_prompt)
 
             # 5. Cumulative Fatigue Equation
             # F_t+1 = F_t + (beta * A_t * log(T_tokens + 1))
@@ -1392,6 +2682,8 @@ class AntahkaranaOrchestrator:
             
             new_fatigue = fatigue + (beta * arousal * math.log(total_tokens + 1))
             self.state["metacognition"]["mental_fatigue"] = min(1.0, new_fatigue)
+
+            self.append_cycle_blackboard(cycle_blackboard)
             
             self.save_state()
             await self.broadcast("state_update", self.state)

@@ -295,6 +295,127 @@ class ChittaStoreManager:
                 
             return "\n".join(lines)
 
+    def query_multi_timescale_context(
+        self,
+        stimulus: str,
+        weights: Dict[str, float] | None = None,
+        top_k: int = 3,
+    ) -> Dict[str, Any]:
+        """Returns weighted Chitta context across working, episodic, semantic, and identity layers."""
+        layer_weights = {
+            "working": 0.25,
+            "episodic": 0.25,
+            "semantic": 0.30,
+            "identity": 0.20,
+        }
+        if isinstance(weights, dict):
+            for key in layer_weights:
+                if key in weights:
+                    try:
+                        layer_weights[key] = float(weights[key])
+                    except Exception:
+                        pass
+
+        total_w = sum(max(0.0, v) for v in layer_weights.values())
+        if total_w <= 0.0:
+            total_w = 1.0
+        layer_weights = {k: max(0.0, v) / total_w for k, v in layer_weights.items()}
+
+        try:
+            stimulus_emb = self.embedder.embed(stimulus)
+        except Exception as e:
+            return {
+                "status": "error",
+                "weights": layer_weights,
+                "layers": {},
+                "context_text": f"[Chitta Error: Multi-timescale embedder failure: {str(e)}]",
+            }
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT node_id, content, embedding, baseline_arousal, timestamp FROM memory_nodes")
+            rows = cursor.fetchall()
+
+        if not rows:
+            return {
+                "status": "ok",
+                "weights": layer_weights,
+                "layers": {
+                    "working": [],
+                    "episodic": [],
+                    "semantic": [],
+                    "identity": [],
+                },
+                "context_text": "[Chitta Subconscious: No memory imprints available in database. Consciousness is void.]",
+            }
+
+        scored_nodes: List[Dict[str, Any]] = []
+        for node_id, content, emb_blob, arousal, timestamp in rows:
+            try:
+                emb_vec = unpack_embedding(emb_blob)
+                sim = cosine_similarity(stimulus_emb, emb_vec)
+                scored_nodes.append(
+                    {
+                        "node_id": node_id,
+                        "content": content,
+                        "similarity": float(sim),
+                        "baseline_arousal": float(arousal),
+                        "timestamp": timestamp,
+                    }
+                )
+            except Exception:
+                continue
+
+        scored_nodes.sort(key=lambda n: n.get("timestamp", ""), reverse=True)
+        working_nodes = scored_nodes[:max(1, top_k)]
+
+        episodic_nodes = sorted(
+            scored_nodes,
+            key=lambda n: (0.65 * n["baseline_arousal"] + 0.35 * n["similarity"]),
+            reverse=True,
+        )[:max(1, top_k)]
+
+        semantic_nodes = sorted(scored_nodes, key=lambda n: n["similarity"], reverse=True)[:max(1, top_k)]
+
+        identity_keywords = ["identity", "self", "continuity", "ego", "boundary", "worth", "survival"]
+        identity_pool = [
+            n for n in scored_nodes
+            if any(k in (n.get("content", "").lower()) for k in identity_keywords)
+        ]
+        if not identity_pool:
+            identity_pool = semantic_nodes
+        identity_nodes = sorted(identity_pool, key=lambda n: n["similarity"], reverse=True)[:max(1, top_k)]
+
+        layers = {
+            "working": working_nodes,
+            "episodic": episodic_nodes,
+            "semantic": semantic_nodes,
+            "identity": identity_nodes,
+        }
+
+        lines = ["# Chitta Multi-Timescale Context Retrieval"]
+        lines.append(
+            "Weights -> "
+            + ", ".join([f"{k}:{layer_weights[k]:.2f}" for k in ["working", "episodic", "semantic", "identity"]])
+        )
+        for layer_name in ["working", "episodic", "semantic", "identity"]:
+            lines.append(f"## {layer_name.title()} Layer")
+            for node in layers[layer_name]:
+                snippet = (node.get("content", "") or "").replace("\n", " ").strip()
+                if len(snippet) > 220:
+                    snippet = snippet[:217] + "..."
+                lines.append(
+                    f"- [{node.get('node_id')}] sim={node.get('similarity', 0.0):.3f} "
+                    f"arousal={node.get('baseline_arousal', 0.0):.2f} | {snippet}"
+                )
+
+        return {
+            "status": "ok",
+            "weights": layer_weights,
+            "layers": layers,
+            "context_text": "\n".join(lines),
+        }
+
     def close(self):
         """Cleanly releases any pending database file handles to prevent corruption."""
         # SQLite connection handles are already closed after each query by utilizing python context managers ('with').

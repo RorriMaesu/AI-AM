@@ -468,6 +468,19 @@ function handleServerEvent(event) {
         case 'timeline_update':
             updateTimelineSlot(data.layer, data.content);
             break;
+
+        case 'chat_message':
+            if (data?.sender === 'agent' && data?.content) {
+                appendChatBubble('agent', data.content);
+                if (data?.mode === 'autonomous') {
+                    appendLedgerLog('system', `Autonomous message emitted (${data?.reason || 'policy_ok'}).`);
+                }
+            }
+            break;
+
+        case 'chat_message_suppressed':
+            appendLedgerLog('system', `Autonomous message suppressed (${data?.reason || 'policy'}).`);
+            break;
             
         case 'curiosity_search':
             handleCuriositySearch(data);
@@ -475,6 +488,46 @@ function handleServerEvent(event) {
             
         case 'sandbox_log':
             handleSandboxExecution(data);
+            break;
+
+        case 'tool_intent_planned':
+            handleToolPolicyTelemetry('planned', data);
+            break;
+
+        case 'tool_policy_decision':
+            handleToolPolicyTelemetry('policy', data);
+            break;
+
+        case 'tool_policy_denied':
+            handleToolPolicyTelemetry('denied', data);
+            break;
+
+        case 'tool_execution_started':
+            handleToolPolicyTelemetry('started', data);
+            break;
+
+        case 'tool_execution_completed':
+            handleToolPolicyTelemetry('completed', data);
+            break;
+
+        case 'tool_execution_failed':
+            handleToolPolicyTelemetry('failed', data);
+            break;
+
+        case 'mind_contract_update':
+            handleMindContractUpdate(data);
+            break;
+
+        case 'mind_arbitration':
+            handleMindArbitration(data);
+            break;
+
+        case 'mind_identity_gate':
+            handleMindIdentityGate(data);
+            break;
+
+        case 'mind_negotiation':
+            handleMindNegotiation(data);
             break;
             
         case 'nidra_triggered':
@@ -782,10 +835,6 @@ function updateTimelineSlot(layer, content) {
         parseAndRenderGraph(content);
     }
 
-    // Specific logic updates for Buddhi resolutions (print final replies to chat)
-    if (layer === 'buddhi') {
-        appendChatBubble('agent', content);
-    }
 }
 
 // Parse Chitta GraphRAG context strings and render node networks
@@ -875,14 +924,183 @@ function handleCuriositySearch(data) {
 // Print container logging outputs to console panel
 function handleSandboxExecution(data) {
     const { code, output } = data;
-    sandboxConsole.innerHTML = `
+    const block = document.createElement('div');
+    block.className = 'sandbox-exec-block';
+    block.innerHTML = `
         <span class="console-prompt">BUDDHI Code Directive:</span>
         <pre><code class="language-python">${escapeHtml(code)}</code></pre>
         <span class="console-prompt">Karmendriya Container Output:</span>
         <div class="console-output">${escapeHtml(output)}</div>
     `;
+    sandboxConsole.appendChild(block);
+
+    while (sandboxConsole.children.length > 40) {
+        sandboxConsole.removeChild(sandboxConsole.firstChild);
+    }
+
     sandboxConsole.scrollTop = sandboxConsole.scrollHeight;
     appendLedgerLog('novelty', 'Karmendriya Docker sandbox execution completed.');
+}
+
+function appendSandboxTelemetry(text, tone = 'normal') {
+    if (!sandboxConsole) return;
+    const entry = document.createElement('div');
+    entry.className = `console-meta ${tone}`;
+    const time = new Date().toLocaleTimeString();
+    entry.textContent = `[${time}] ${text}`;
+    sandboxConsole.appendChild(entry);
+
+    while (sandboxConsole.children.length > 40) {
+        sandboxConsole.removeChild(sandboxConsole.firstChild);
+    }
+    sandboxConsole.scrollTop = sandboxConsole.scrollHeight;
+}
+
+function handleToolPolicyTelemetry(eventKind, payload) {
+    const intent = payload?.intent || {};
+    const intentId = intent?.intent_id || 'unknown-intent';
+    const toolType = intent?.tool_type || 'tool';
+
+    if (eventKind === 'planned') {
+        const codeLength = intent?.payload?.code_length || 0;
+        appendLedgerLog('system', `Tool intent planned: ${intentId} (${toolType}, ${codeLength} chars).`);
+        appendSandboxTelemetry(`Tool intent planned: ${intentId} (${toolType}).`, 'system');
+        return;
+    }
+
+    if (eventKind === 'policy') {
+        const decision = payload?.decision || 'unknown';
+        const reasons = Array.isArray(payload?.reasons) ? payload.reasons.join('; ') : '';
+        const tone = decision === 'allow' ? 'normal' : 'failover';
+        appendLedgerLog(tone, `Tool policy decision for ${intentId}: ${decision}${reasons ? ` | ${reasons}` : ''}`);
+        appendSandboxTelemetry(`Policy ${decision.toUpperCase()} for ${intentId}${reasons ? ` -> ${reasons}` : ''}`, tone);
+        return;
+    }
+
+    if (eventKind === 'denied') {
+        const reasons = Array.isArray(payload?.reasons) ? payload.reasons.join('; ') : 'No reason provided';
+        appendLedgerLog('failover', `Tool execution denied by policy (${intentId}): ${reasons}`);
+        appendSandboxTelemetry(`Execution denied for ${intentId}: ${reasons}`, 'failover');
+        return;
+    }
+
+    if (eventKind === 'started') {
+        appendLedgerLog('system', `Tool execution started: ${intentId}`);
+        appendSandboxTelemetry(`Execution started for ${intentId}.`, 'system');
+        return;
+    }
+
+    if (eventKind === 'completed') {
+        appendLedgerLog('novelty', `Tool execution completed: ${intentId}`);
+        appendSandboxTelemetry(`Execution completed for ${intentId}.`, 'normal');
+        return;
+    }
+
+    if (eventKind === 'failed') {
+        appendLedgerLog('failover', `Tool execution failed: ${intentId}`);
+        appendSandboxTelemetry(`Execution failed for ${intentId}.`, 'failover');
+    }
+}
+
+function handleMindContractUpdate(payload) {
+    const cycleId = payload?.cycle_id || 'cycle_unknown';
+    const salience = payload?.salience || {};
+    const conflicts = Array.isArray(payload?.conflicts) ? payload.conflicts : [];
+    const roles = payload?.roles || {};
+    const intentChannels = payload?.intent_channels || {};
+    const roleModulation = payload?.role_modulation || {};
+    const mm = payload?.multimodal_evidence || {};
+
+    const summary = [
+        `Mind contract ${cycleId}`,
+        `S=${Number(salience?.composite || 0).toFixed(2)}`,
+        `N=${Number(salience?.novelty || 0).toFixed(2)}`,
+        `U=${Number(salience?.urgency || 0).toFixed(2)}`,
+        `I=${Number(salience?.identity_threat || 0).toFixed(2)}`,
+        `conflicts=${conflicts.length}`
+    ].join(' | ');
+
+    appendLedgerLog(conflicts.length > 0 ? 'failover' : 'system', summary);
+
+    const roleLine = [
+        `manas:${Number(roles?.manas?.confidence || 0).toFixed(2)}${roles?.manas?.schema_valid ? '✓' : '!'}`,
+        `chitta:${Number(roles?.chitta?.confidence || 0).toFixed(2)}${roles?.chitta?.schema_valid ? '✓' : '!'}`,
+        `ahamkara:${Number(roles?.ahamkara?.confidence || 0).toFixed(2)}${roles?.ahamkara?.schema_valid ? '✓' : '!'}`,
+        `buddhi:${Number(roles?.buddhi?.confidence || 0).toFixed(2)}${roles?.buddhi?.schema_valid ? '✓' : '!'}`
+    ].join(' | ');
+    appendSandboxTelemetry(`Contract confidence -> ${roleLine}`, 'system');
+
+    const missingSchema = [];
+    ['manas', 'chitta', 'ahamkara', 'buddhi'].forEach((roleName) => {
+        const missing = roles?.[roleName]?.schema_missing || [];
+        if (Array.isArray(missing) && missing.length > 0) {
+            missingSchema.push(`${roleName}:${missing.join(',')}`);
+        }
+    });
+    if (missingSchema.length > 0) {
+        appendLedgerLog('failover', `Schema missing -> ${missingSchema.join(' | ')}`);
+    }
+
+    const repairBits = [];
+    ['manas', 'ahamkara', 'buddhi'].forEach((roleName) => {
+        const repair = roles?.[roleName]?.schema_repair || {};
+        if (repair?.attempted) {
+            repairBits.push(`${roleName}:${repair?.success ? 'repaired' : 'fallback'}`);
+        }
+    });
+    if (repairBits.length > 0) {
+        appendLedgerLog('failover', `Schema repair -> ${repairBits.join(' | ')}`);
+    }
+
+    const modLine = [
+        `M:t${Number(roleModulation?.manas?.temperature || 0).toFixed(2)}/p${Number(roleModulation?.manas?.top_p || 0).toFixed(2)}`,
+        `A:t${Number(roleModulation?.ahamkara?.temperature || 0).toFixed(2)}/p${Number(roleModulation?.ahamkara?.top_p || 0).toFixed(2)}`,
+        `B:t${Number(roleModulation?.buddhi?.temperature || 0).toFixed(2)}/p${Number(roleModulation?.buddhi?.top_p || 0).toFixed(2)}`
+    ].join(' | ');
+    appendSandboxTelemetry(`Role modulation -> ${modLine}`, 'system');
+
+    appendSandboxTelemetry(`Multimodal evidence -> used:${Boolean(mm?.used)} reason:${mm?.reason || 'none'}`, mm?.used ? 'normal' : 'system');
+
+    if (conflicts.length > 0) {
+        const topConflict = conflicts[0] || {};
+        appendSandboxTelemetry(`Conflict: ${topConflict.type || 'unknown'} (${topConflict.severity || 'n/a'}) ${topConflict.reason || ''}`, 'failover');
+    }
+
+    const curiosityIntent = intentChannels?.curiosity_intent;
+    if (curiosityIntent?.type && curiosityIntent?.target) {
+        appendLedgerLog('search', `Buddhi intent -> ${curiosityIntent.type}: ${curiosityIntent.target}`);
+    }
+}
+
+function handleMindArbitration(payload) {
+    const cycleId = payload?.cycle_id || 'cycle_unknown';
+    const conflicts = Array.isArray(payload?.conflicts) ? payload.conflicts : [];
+    const note = payload?.note || 'Arbitration note unavailable.';
+    const top = conflicts[0] || {};
+
+    appendLedgerLog('failover', `Arbitration ${cycleId}: ${top.type || 'conflict'} (${top.severity || 'n/a'})`);
+    appendSandboxTelemetry(`Arbitration engaged -> ${top.reason || 'Reason unavailable'}`, 'failover');
+    appendSandboxTelemetry(note, 'system');
+}
+
+function handleMindIdentityGate(payload) {
+    const level = payload?.level || 'unknown';
+    const reason = payload?.reason || 'not_provided';
+    const status = payload?.status || 'unknown';
+    const allowCuriosity = Boolean(payload?.allow_curiosity);
+    const allowTool = Boolean(payload?.allow_tool);
+    const tone = level === 'blocked' ? 'failover' : (level === 'caution' ? 'system' : 'normal');
+    appendLedgerLog(tone, `Identity gate ${level}/${status}: curiosity=${allowCuriosity} tool=${allowTool} (${reason})`);
+}
+
+function handleMindNegotiation(payload) {
+    const attempted = Boolean(payload?.attempted);
+    const applied = Boolean(payload?.applied);
+    const rounds = Number(payload?.rounds_used || 0);
+    const before = Number(payload?.conflicts_before || 0);
+    const after = Number(payload?.conflicts_after || 0);
+    const tone = applied ? 'system' : (attempted ? 'failover' : 'normal');
+    appendLedgerLog(tone, `Negotiation pass: attempted=${attempted} applied=${applied} rounds=${rounds} conflicts=${before}->${after}`);
 }
 
 function normalizeFramePath(framePath) {

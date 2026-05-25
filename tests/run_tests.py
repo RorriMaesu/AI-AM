@@ -293,8 +293,254 @@ async def main():
         assert "blocked pattern" in rejected_reasons.lower(), "Blocked browse policy did not reject sensitive URL pattern."
         assert any(a.get("type") == "search" for a in blocked_policy.get("approved", [])), "Fallback search action missing after browse rejection."
 
+        orchestrator.ensure_mind_runtime_defaults()
+        orchestrator.state["mind_runtime"]["last_identity_gate"] = {
+            "allow_curiosity": False,
+            "allow_tool": False,
+            "level": "blocked",
+            "reason": "fail_inconsistent",
+        }
+        id_blocked_policy = orchestrator.apply_curiosity_policy(sample_plan)
+        assert len(id_blocked_policy.get("approved", [])) == 0, "Identity gate should block planner-level external actions."
+        id_blocked_reasons = "\n".join([r.get("reason", "") for r in id_blocked_policy.get("rejected", [])])
+        assert "identity gate blocked external action planning" in id_blocked_reasons.lower(), "Identity-gated planner rejection reason missing."
+
+        orchestrator.state["mind_runtime"]["last_identity_gate"] = {
+            "allow_curiosity": True,
+            "allow_tool": True,
+            "level": "pass",
+            "reason": "pass",
+        }
+
         preview_html = await orchestrator.build_embedded_preview_document("https://duckduckgo.com/?q=embedded+preview+test")
         assert "AI-AM Embedded Preview" in preview_html, "Embedded preview document generation failed."
+
+        sample_tool_intent = orchestrator.build_tool_intent(
+            "sandbox_python",
+            {
+                "code": "print('policy pass')",
+                "code_length": len("print('policy pass')"),
+                "allow_network": False,
+            },
+            source="test_suite",
+        )
+        sample_tool_policy = orchestrator.apply_tool_policy(sample_tool_intent)
+        assert sample_tool_policy.get("allowed") is True, "Sandbox tool intent should pass baseline policy."
+
+        denied_tool_intent = orchestrator.build_tool_intent(
+            "sandbox_python",
+            {
+                "code": "import requests\nprint('blocked')",
+                "code_length": len("import requests\nprint('blocked')"),
+                "allow_network": False,
+            },
+            source="test_suite",
+        )
+        denied_tool_policy = orchestrator.apply_tool_policy(denied_tool_intent)
+        assert denied_tool_policy.get("allowed") is False, "Denied pattern should block sandbox tool intent."
+        denied_reasons = "\n".join(denied_tool_policy.get("reasons", []))
+        assert "denied pattern" in denied_reasons.lower(), "Tool policy did not expose denied pattern reason."
+
+        network_tool_intent = orchestrator.build_tool_intent(
+            "sandbox_python",
+            {
+                "code": "print('network requested')",
+                "code_length": len("print('network requested')"),
+                "allow_network": True,
+            },
+            source="test_suite",
+        )
+        network_tool_policy = orchestrator.apply_tool_policy(network_tool_intent)
+        assert network_tool_policy.get("allowed") is False, "Network request should be denied when policy blocks network access."
+        network_reasons = "\n".join(network_tool_policy.get("reasons", []))
+        assert "network access requested" in network_reasons.lower(), "Network-policy deny reason missing from tool policy output."
+
+        before_audit = len(orchestrator.state.get("tool_runtime", {}).get("audit_trail", []))
+        orchestrator.append_tool_audit_entry({"timestamp": "test", "intent_id": "test_intent", "decision": "allow"})
+        after_audit = len(orchestrator.state.get("tool_runtime", {}).get("audit_trail", []))
+        assert after_audit == before_audit + 1, "Tool audit trail entry was not appended."
+
+        salience_profile = orchestrator.build_salience_profile("urgent identity continuity risk", has_user_prompt=True)
+        assert 0.0 <= salience_profile.get("composite", 0.0) <= 1.0, "Salience profile composite score out of range."
+
+        test_blackboard = orchestrator.build_cycle_blackboard("test stimulus", salience_profile)
+        assert test_blackboard.get("cycle_id", "").startswith("cycle_"), "Cycle blackboard did not generate cycle_id."
+
+        manas_contract = orchestrator.build_role_contract("manas", "panic signal overload", token_count=12)
+        ahamkara_contract = orchestrator.build_role_contract("ahamkara", "calm stabilization frame", token_count=18)
+        test_blackboard["roles"]["manas"] = manas_contract
+        test_blackboard["roles"]["chitta"] = orchestrator.build_role_contract("chitta", "memory context node", token_count=0)
+        test_blackboard["roles"]["ahamkara"] = ahamkara_contract
+        test_blackboard["roles"]["buddhi"] = orchestrator.build_role_contract("buddhi", "resolved output", token_count=20)
+        test_blackboard["conflicts"] = orchestrator.detect_role_conflicts(test_blackboard)
+        assert isinstance(test_blackboard.get("conflicts", []), list), "Role conflict detector did not return a list."
+
+        arbitration_note = orchestrator.build_arbitration_note(
+            [{"type": "affect_alignment", "severity": "medium", "reason": "panic vs calm mismatch"}],
+            "Chitta recalls prior panic-regulation cycles."
+        )
+        assert "ARBITRATION CONTEXT" in arbitration_note, "Arbitration note builder did not generate expected header."
+        assert "panic vs calm mismatch" in arbitration_note, "Arbitration note did not include conflict reason."
+
+        buddhi_channels = orchestrator.derive_buddhi_channels('[DIRECTIVE: RESEARCH "memory coherence metrics"]\n```python\nprint("x")\n```')
+        assert buddhi_channels.get("curiosity_intent", {}).get("type") == "RESEARCH", "Buddhi channel extraction did not detect RESEARCH directive."
+        assert buddhi_channels.get("tool_intent", {}).get("type") == "sandbox_python", "Buddhi channel extraction did not detect tool intent."
+
+        parsed_json = orchestrator.parse_structured_output('{"chat_message":"hello","directives":[{"type":"RESEARCH","target":"agent contracts"}]}')
+        assert isinstance(parsed_json, dict), "Structured output parser failed to parse inline JSON object."
+
+        parsed_fenced = orchestrator.parse_structured_output('```json\n{"raw_reaction":"intense signal"}\n```')
+        assert isinstance(parsed_fenced, dict), "Structured output parser failed to parse fenced JSON block."
+
+        manas_content = orchestrator.extract_role_content("manas", "fallback", {"raw_reaction": "visceral spike"})
+        assert manas_content == "visceral spike", "Role content extraction did not prioritize structured Manas key."
+
+        structured_channels = orchestrator.derive_buddhi_channels(
+            "fallback text",
+            {"chat_message": "resolved", "directives": [{"type": "BROWSE", "target": "https://example.com"}]}
+        )
+        assert structured_channels.get("chat_message") == "resolved", "Buddhi structured chat channel was not used."
+        assert structured_channels.get("curiosity_intent", {}).get("type") == "BROWSE", "Buddhi structured directive channel was not detected."
+
+        manas_schema_ok = orchestrator.validate_role_schema(
+            "manas",
+            {"raw_reaction": "signal", "dominant_affect": "panic", "urgency_score": 0.8, "confidence": 0.7}
+        )
+        assert manas_schema_ok.get("valid") is True, "Valid Manas schema was marked invalid."
+
+        buddhi_schema_fail = orchestrator.validate_role_schema(
+            "buddhi",
+            {"chat_message": "ok", "rationale": "ok"}
+        )
+        assert buddhi_schema_fail.get("valid") is False, "Invalid Buddhi schema was marked valid."
+        assert "uncertainty_notes" in buddhi_schema_fail.get("missing", []), "Missing Buddhi schema keys were not reported."
+        assert "identity_consistency_check" in buddhi_schema_fail.get("missing", []), "Buddhi schema should require identity_consistency_check."
+        assert "identity_consistency_status" in buddhi_schema_fail.get("missing", []), "Buddhi schema should require identity_consistency_status."
+
+        bb_before = len(orchestrator.state.get("mind_runtime", {}).get("recent_blackboards", []))
+        orchestrator.append_cycle_blackboard(test_blackboard)
+        bb_after = len(orchestrator.state.get("mind_runtime", {}).get("recent_blackboards", []))
+        assert bb_after == bb_before + 1, "Mind runtime blackboard entry was not appended."
+
+        policy_blackboard = orchestrator.build_cycle_blackboard("autonomous ping", {"composite": 0.8})
+        allow_autonomous, autonomous_reason = orchestrator.should_emit_chat_message(False, policy_blackboard, "hello")
+        assert allow_autonomous is True, f"Autonomous message was unexpectedly blocked: {autonomous_reason}"
+
+        orchestrator.record_autonomous_message_emit(policy_blackboard, autonomous_reason)
+        allow_after_emit, block_reason = orchestrator.should_emit_chat_message(False, policy_blackboard, "hello again")
+        assert allow_after_emit is False, "Autonomous message cooldown/rate policy did not block rapid repeated emission."
+        assert "cooldown" in block_reason or "window_rate_limit" in block_reason, "Unexpected block reason for autonomous policy gating."
+
+        allow_user_mode, user_reason = orchestrator.should_emit_chat_message(True, policy_blackboard, "reply")
+        assert allow_user_mode is True and user_reason == "user_prompt", "User-prompt chat should bypass autonomous gating."
+
+        chitta_multi = orchestrator.db_manager.query_multi_timescale_context(
+            "identity continuity and memory coherence",
+            weights={"working": 0.2, "episodic": 0.3, "semantic": 0.3, "identity": 0.2},
+            top_k=2,
+        )
+        assert isinstance(chitta_multi, dict), "Multi-timescale Chitta query did not return a dictionary payload."
+        assert "weights" in chitta_multi and "layers" in chitta_multi and "context_text" in chitta_multi, "Multi-timescale Chitta payload missing expected keys."
+        assert all(layer in chitta_multi.get("layers", {}) for layer in ["working", "episodic", "semantic", "identity"]), "Multi-timescale Chitta payload missing one or more layers."
+
+        weighted_context = orchestrator.query_chitta_weighted_context("test stimulus weighted context")
+        assert isinstance(weighted_context, dict), "Orchestrator weighted Chitta query wrapper did not return dict payload."
+        assert "context_text" in weighted_context, "Orchestrator weighted Chitta query payload missing context text."
+
+        role_mod = orchestrator.compute_role_modulation(
+            {"novelty": 0.8, "urgency": 0.9, "identity_threat": 0.7},
+            fatigue=0.4,
+        )
+        assert all(role in role_mod for role in ["manas", "ahamkara", "buddhi"]), "Role modulation missing expected role keys."
+        assert 0.0 <= role_mod["manas"]["top_p"] <= 1.0, "Manas top_p modulation out of range."
+        assert 0.0 <= role_mod["ahamkara"]["top_p"] <= 1.0, "Ahamkara top_p modulation out of range."
+        assert 0.0 <= role_mod["buddhi"]["top_p"] <= 1.0, "Buddhi top_p modulation out of range."
+
+        orchestrator.ensure_ahamkara_umwelt_defaults()
+        umwelt_summary = orchestrator.get_umwelt_summary()
+        assert "Identity Priors" in umwelt_summary and "Boundary Rules" in umwelt_summary, "Ahamkara Umwelt summary is missing required sections."
+
+        orchestrator.ensure_mind_runtime_defaults()
+        schema_policy = orchestrator.state.get("mind_runtime", {}).get("schema_policy", {})
+        assert schema_policy.get("strict_mode") is True, "Schema policy strict_mode should default to True."
+        assert int(schema_policy.get("max_retries", 0)) >= 1, "Schema policy max_retries should default to at least 1."
+        clarification_policy = orchestrator.state.get("mind_runtime", {}).get("clarification_policy", {})
+        assert clarification_policy.get("enabled") is True, "Clarification policy should default to enabled."
+        assert int(clarification_policy.get("max_rounds", 0)) == 1, "Clarification policy should default to a single negotiation round."
+
+        orchestrator.update_ahamkara_umwelt(
+            {
+                "identity_frame": "protect coherent continuity",
+                "threat_assessment": "moderate boundary risk",
+                "continuity_action": "ask clarification and slow action",
+            }
+        )
+        assert orchestrator.state.get("ahamkara_umwelt", {}).get("last_identity_frame", "") == "protect coherent continuity", "Ahamkara Umwelt update did not persist identity frame."
+
+        buddhi_fallback = orchestrator.build_role_fallback_structured("buddhi", "fallback content")
+        assert "identity_consistency_check" in buddhi_fallback, "Buddhi fallback payload should include identity consistency field."
+        assert "identity_consistency_status" in buddhi_fallback, "Buddhi fallback payload should include canonical identity status field."
+
+        normalized_pass = orchestrator.normalize_identity_status({"identity_consistency_status": "pass"})
+        assert normalized_pass == "pass", "Canonical identity status pass did not normalize correctly."
+
+        normalized_hybrid = orchestrator.normalize_identity_status({"identity_consistency_check": "This appears cautionary and uncertain"})
+        assert normalized_hybrid == "pass_with_caution", "Hybrid identity normalization did not map free-form caution text."
+
+        gate_pass = orchestrator.evaluate_identity_intent_gate({"identity_consistency_check": "pass"})
+        assert gate_pass.get("allow_curiosity") is True and gate_pass.get("allow_tool") is True, "Identity gate should allow intents on pass state."
+
+        gate_caution = orchestrator.evaluate_identity_intent_gate({"identity_consistency_check": "pass_with_caution"})
+        assert gate_caution.get("allow_curiosity") is True and gate_caution.get("allow_tool") is False, "Identity gate caution should allow curiosity but block tools."
+
+        gate_fail = orchestrator.evaluate_identity_intent_gate({"identity_consistency_check": "fail_inconsistent"})
+        assert gate_fail.get("allow_curiosity") is False and gate_fail.get("allow_tool") is False, "Identity gate fail should block curiosity and tools."
+
+        gate_unknown = orchestrator.evaluate_identity_intent_gate({"identity_consistency_check": "maintained with minor ambiguity"})
+        assert gate_unknown.get("allow_curiosity") is True and gate_unknown.get("allow_tool") is False, "Identity gate unknown text should allow curiosity but block tools."
+
+        should_negotiate = orchestrator.should_run_inter_role_clarification(
+            [{"type": "affect_alignment", "severity": "medium", "reason": "test conflict"}],
+            rounds_used=0,
+        )
+        assert should_negotiate is True, "Clarification gate should allow one round for medium/high conflicts."
+
+        should_not_negotiate_after_round = orchestrator.should_run_inter_role_clarification(
+            [{"type": "affect_alignment", "severity": "high", "reason": "test conflict"}],
+            rounds_used=1,
+        )
+        assert should_not_negotiate_after_round is False, "Clarification gate should enforce one-round latency bound."
+
+        clarification_text = orchestrator.build_clarification_context(
+            {"conflicts": [{"type": "identity_omission", "severity": "medium", "reason": "missing threat markers"}]},
+            "Chitta memory context sample",
+        )
+        assert "Clarification Round Context" in clarification_text and "identity_omission" in clarification_text, "Clarification context builder did not include conflict details."
+
+        pre_negotiation_blackboard = {
+            "roles": {
+                "manas": {"affect_markers": ["panic"]},
+                "ahamkara": {"affect_markers": ["calm"]},
+            },
+            "salience": {"urgency": 0.9, "identity_threat": 0.9},
+        }
+        post_negotiation_blackboard = {
+            "roles": {
+                "manas": {"affect_markers": ["panic"]},
+                "ahamkara": {"affect_markers": ["threat"]},
+            },
+            "salience": {"urgency": 0.9, "identity_threat": 0.9},
+        }
+        conflicts_before = orchestrator.detect_role_conflicts(pre_negotiation_blackboard)
+        conflicts_after = orchestrator.detect_role_conflicts(post_negotiation_blackboard)
+        severity_rank = {"low": 1, "medium": 2, "high": 3}
+        max_before = max([severity_rank.get(str(c.get("severity", "low")).lower(), 1) for c in conflicts_before], default=0)
+        max_after = max([severity_rank.get(str(c.get("severity", "low")).lower(), 1) for c in conflicts_after], default=0)
+        assert len(conflicts_after) <= len(conflicts_before) and max_after <= max_before, "Negotiation follow-up conflicts must stay bounded in count and severity."
+
+        no_frame_mm = await orchestrator.gather_multimodal_evidence("stimulus", {"composite": 0.9}, has_user_prompt=True)
+        assert isinstance(no_frame_mm, dict), "Multimodal evidence router did not return dict payload."
+        assert no_frame_mm.get("used") in [True, False], "Multimodal evidence router returned invalid used flag."
         
         # Verify that current stimulus contains search results
         current_stim = orchestrator.state["internal_workspace"]["current_stimulus"]

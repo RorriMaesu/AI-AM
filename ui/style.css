@@ -1095,6 +1095,23 @@ h1 .subtitle {
     word-break: break-all;
 }
 
+.sandbox-exec-block {
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+    padding-top: 10px;
+    margin-top: 10px;
+}
+
+.console-meta {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.console-meta.system { color: #93c5fd; }
+.console-meta.normal { color: #cbd5e1; }
+.console-meta.failover { color: #f87171; }
+
 .ledger-logs {
     flex: 1;
     padding: 12px;
