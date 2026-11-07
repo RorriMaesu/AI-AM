@@ -46,7 +46,7 @@ jobs:
           $out = Join-Path $dataDir 'proxy-out.log'
           $err = Join-Path $dataDir 'proxy-err.log'
           $java = Join-Path $env:JAVA_HOME 'bin\java.exe'
-          $argsLine = "-Djava.io.tmpdir=$tempDir -Duser.home=$dataDir -DgeyserUdpAddress=$address -DgeyserAdvertiseAddresses=$address -Xms128M -Xmx768M -jar ViaProxy-3.4.14.jar config viaproxy.yml"
+          $argsLine = "-Djava.net.preferIPv4Stack=true -Djava.io.tmpdir=$tempDir -Duser.home=$dataDir -DgeyserUdpAddress=$address -DgeyserAdvertiseAddresses=$address -Xms128M -Xmx768M -jar ViaProxy-3.4.14.jar config viaproxy.yml"
           $proc = Start-Process -FilePath $java -ArgumentList $argsLine -WorkingDirectory $dataDir -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
           try {
               $deadline = (Get-Date).AddSeconds(90)
@@ -58,9 +58,16 @@ jobs:
                   if ($javaPort -and $signal -and $transport) { break }
                   Start-Sleep -Seconds 1
               } while ((Get-Date) -lt $deadline)
-              if (!$javaPort -or !$signal -or !$transport) { throw 'The expected proxy listeners did not start.' }
+              if (!$javaPort -or !$signal -or !$transport) {
+                  Write-Host "Expected Bedrock address $address. Proxy PID $($proc.Id)."
+                  Get-NetTCPConnection -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue |
+                      Format-Table LocalAddress,LocalPort,OwningProcess
+                  Get-NetUDPEndpoint -OwningProcess $proc.Id -ErrorAction SilentlyContinue |
+                      Format-Table LocalAddress,LocalPort,OwningProcess
+                  throw 'The expected proxy listeners did not start.'
+              }
               Write-Host 'ViaProxy is listening on loopback. Geyser NetherNet opened TCP and UDP on the private runner address.'
           } finally {
               if (!$proc.HasExited) { Stop-Process -InputObject $proc }
-              Get-Content -LiteralPath $out,$err -Tail 65
+              Get-Content -LiteralPath $out,$err -TotalCount 65
           }
