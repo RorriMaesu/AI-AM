@@ -105,6 +105,9 @@ async function main () {
     await poll(() => bodies.every(body => body.bot.blockAt(fixtureLog)?.name === 'oak_log'),
       10000, 'both players received the fixture log through the game connection')
   }
+  // Let the initial server position and client physics settle before applying
+  // a new camera direction. Spawn can arrive before those updates finish.
+  await Promise.all(bodies.map(body => body.bot.waitForTicks(10)))
   mark('two_real_clients_spawned_in_survival', { agents: bodies.map(b => ({ id: b.config.id, version: b.bot.version, position: snapshot(b.bot.entity.position) })) })
   assert.equal((await observe()).enabled, false, 'Joining must not automatically enable the body')
   assert((await observe()).health > 0, 'Health must reach the bridge after spawn')

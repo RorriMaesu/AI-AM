@@ -342,7 +342,7 @@ class AgentBody {
     if (record.skill === 'look') {
       const yaw = angle(bot.entity.yaw + Math.PI / 2)
       record.effect_started = true
-      await this.step(record, () => bot.look(yaw, 0))
+      await this.step(record, () => bot.look(yaw, 0, true))
       assert(Math.abs(angle(bot.entity.yaw - yaw)) < 0.1, 'Look was not applied')
       return { yaw: bot.entity.yaw }
     }
