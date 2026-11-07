@@ -60,6 +60,8 @@ These are component experiments. They do not measure the quality of an LLM's int
 
 Unit, API, and browser tests separately cover persistence, action lifecycle, bounded controls, and the interface. The earlier [local Gemma validation](live-validation-2026-11-07.md) tested v2 behavior; its seven-scenario result must not be treated as validation of every new experimental feature.
 
+A separate [live Gemma validation](experimental-validation-2026-11-07.md) records two actual simulator actions, a context-limit failure found during testing, the corrected agency response, and a final check against the tested code. It is one short synthetic scenario, not a general model benchmark.
+
 ## What a stronger evaluation would require
 
 A genuine comparative study should hold the base model, evidence, task distribution, and compute allowance as constant as practical. Compare an ordinary retrieval assistant, the four-stage v2 pipeline, and the experimental workspace. Use unseen environments, repeated trials, and explicit uncertainty bounds.

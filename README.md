@@ -15,7 +15,8 @@ events supported a decision.
 The experimental mind extension adds persistent attention, an action ledger,
 and a small simulated world with partial observations and learned action
 predictions. Autonomous world exploration begins only after an explicit,
-bounded goal run. See [the experimental guide](docs/experimental-mind.md).
+bounded goal run. See [the experimental guide](docs/experimental-mind.md) and
+[the actual Gemma experiment and validation record](docs/experimental-validation-2026-11-07.md).
 
 This is an implementation of integrated cognition as a simulation.
 First-person language and an animated dashboard are not evidence of

@@ -1,0 +1,1896 @@
+{
+  "date": "2026-11-07",
+  "scope": "One synthetic local-model task sequence, repeated after a context-fit fix, plus one final-code agency check in the same corrected RAM world. Not a statistical benchmark or a test establishing consciousness.",
+  "method": {
+    "provider": "Existing local Ollama",
+    "model": "gemma4:e4b",
+    "roles": "The same installed model served four separate functional calls.",
+    "state": "Isolated SQLite :memory: database",
+    "execution": "Runtime source loaded into RAM from GitHub. Actual engine/contracts/store/inference; scripted demo disabled. Simulator actions were selected by the real model.",
+    "storage": "No model/package downloads or local project/test/database artifact files were created.",
+    "timing": "Wall-clock cycle timing. No forced model unload, controlled cold/warm comparison, or competing-load benchmark was performed.",
+    "faculty_capture": "Initial/corrected role_calls contain selected structured output fields; strings capped at 800 characters and list entries at 240 characters. Final guard role_calls retain full structured result objects. No model thinking-channel content was collected."
+  },
+  "source_refs": {
+    "initial": {
+      "engine_tree": "dcecdd0ed8d08004ab67483b99f3fcdc24daeec2",
+      "environment_world_model_tree": "245d045c0d78d94556e4e5bdf8fec147ea10fe58",
+      "workspace_tree": "09d81d2c33c8ea9d0d81894a35590519e9436787",
+      "contracts_inference_config_tree": "32ec3562f2a8617c71402db74148e50c7abc576d",
+      "database_tree": "6106b84996b1faad6acce275ac5d1b4f6a7d02d2"
+    },
+    "corrected": {
+      "base_commit": "bc4dd76b2fe9019738b784784490283061ea46f0",
+      "inference_tree": "8420efc1b7244f28245d5a5aca82953cd05aa99e",
+      "runtime_blobs": [
+        {
+          "path": "core/contracts.py",
+          "sha": "1084cb13baf8799445864c5c22da65672d7d91c7"
+        },
+        {
+          "path": "core/config.py",
+          "sha": "c676d02052be4b6531dab54de930b61336040f20"
+        },
+        {
+          "path": "core/actions.py",
+          "sha": "918daeda8f8e0e7d448171cfb92fbb0c1a3ba2dc"
+        },
+        {
+          "path": "core/workspace.py",
+          "sha": "1a3ff2687ed623efa2c9431db7da22245e7e0df8"
+        },
+        {
+          "path": "core/environment.py",
+          "sha": "8fa352979bcd193affaa95ebea47589ec771ef88"
+        },
+        {
+          "path": "core/world_model.py",
+          "sha": "45174db27263bde8770295336dffcf39f6299fcb"
+        },
+        {
+          "path": "core/inference.py",
+          "sha": "ba27615102792d6867fc5411a0f61b5a6ec35e94"
+        },
+        {
+          "path": "database/db_manager.py",
+          "sha": "d84a2d859810d85a5c8c235c21cda3913ece963c"
+        },
+        {
+          "path": "core/engine.py",
+          "sha": "549b9549e563590d725be24b00ba73087dec2cac"
+        }
+      ]
+    },
+    "final_guard": {
+      "commit": "3a64da83ec822faab5d23539f3fc4374ebccc3bc",
+      "inference_tree": "c695971e8cea0f2bd21970c47ac9a667c7d4e4f6",
+      "runtime_blobs": [
+        {
+          "path": "core/contracts.py",
+          "sha": "1084cb13baf8799445864c5c22da65672d7d91c7"
+        },
+        {
+          "path": "core/config.py",
+          "sha": "c676d02052be4b6531dab54de930b61336040f20"
+        },
+        {
+          "path": "core/actions.py",
+          "sha": "918daeda8f8e0e7d448171cfb92fbb0c1a3ba2dc"
+        },
+        {
+          "path": "core/workspace.py",
+          "sha": "1a3ff2687ed623efa2c9431db7da22245e7e0df8"
+        },
+        {
+          "path": "core/environment.py",
+          "sha": "8fa352979bcd193affaa95ebea47589ec771ef88"
+        },
+        {
+          "path": "core/world_model.py",
+          "sha": "45174db27263bde8770295336dffcf39f6299fcb"
+        },
+        {
+          "path": "core/inference.py",
+          "sha": "a2baa9a996c256f17eea944dcae2009bfae33fe2"
+        },
+        {
+          "path": "database/db_manager.py",
+          "sha": "d84a2d859810d85a5c8c235c21cda3913ece963c"
+        },
+        {
+          "path": "core/engine.py",
+          "sha": "549b9549e563590d725be24b00ba73087dec2cac"
+        }
+      ],
+      "reload": "Only core/inference.py differed among the nine loaded runtime files. It was reloaded and a new Ollama client attached to the same engine and open RAM store before another ordinary user turn. The simulator actions were not replayed."
+    }
+  },
+  "assessment": {
+    "initial": "Two real simulator actions succeeded. The follow-up agency turn failed before Buddhi generation because its context exceeded the configured budget; there was no outward agency reply.",
+    "corrected": "Both real simulator actions and the ordinary agency turn completed. Public observation and evaluator state agreed that the key was carried. The two-action budget stopped autonomy.",
+    "final_guard": "All four roles completed on final runtime code. The reply correctly identified moving forward and picking up the key and denied actions outside the simulation. No further actions occurred and the world state was unchanged.",
+    "limits": "These observations establish behavior in this short task. They do not establish subjective experience, general reliability, broader intelligence gains, physical robot competence, or long-term learning."
+  },
+  "initial_run": {
+    "model": "gemma4:e4b",
+    "provider": "actual local Ollama",
+    "settings": {
+      "max_output_tokens": 1600,
+      "num_ctx": 8192,
+      "request_timeout": 180,
+      "cycle_timeout": 600
+    },
+    "cases": [
+      {
+        "kind": "experiment",
+        "prompt": "In the simulated room, pick up the visible brass key. Use a simulation action when appropriate; stop once it is in your inventory. Do not merely describe an action.",
+        "seconds": 70.83,
+        "status": "complete",
+        "error": null,
+        "reply": "Simulation move_forward: position_changed",
+        "role_calls": [
+          {
+            "role": "manas",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 52.39,
+            "tokens": 723,
+            "result": {
+              "observations": [
+                "The simulated room contains a 'brass key' object with ID 'key', located at position [3, 3].",
+                "The agent's current position is [2, 3], and its heading is 'east'.",
+                "The agent's inventory is currently empty.",
+                "The available actions include 'move_forward' and 'pick_up'."
+              ],
+              "uncertainties": [],
+              "salience": 0.9
+            }
+          },
+          {
+            "role": "chitta",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 3,
+            "tokens": 236,
+            "result": {
+              "selected_memory_ids": [],
+              "contradictions": [],
+              "missing_context": []
+            }
+          },
+          {
+            "role": "ahamkara",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 8.47,
+            "tokens": 724,
+            "result": {
+              "agency": "The agent must initiate the movement action (`move_forward`) to close the gap between its current position [2, 3] and the key's location [3, 3], thereby progressing toward the committed goal.",
+              "attended_ids": [
+                "event:5ed790a9-1852-42e9-8031-35bf09a9c936"
+              ],
+              "uncertainty_to_check": ""
+            }
+          },
+          {
+            "role": "buddhi",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 6.95,
+            "tokens": 573,
+            "result": {
+              "action": "environment",
+              "environment_action": "move_forward",
+              "target": "",
+              "prediction": "The agent will move from its current position [2, 3] to [3, 3] while maintaining an 'east' heading.",
+              "evidence_ids": [
+                "5ed790a9-1852-42e9-8031-35bf09a9c936"
+              ]
+            }
+          }
+        ],
+        "actions": [
+          {
+            "id": "99916abbbd965e76b345629d755442c1",
+            "episode_id": "5ed790a9-1852-42e9-8031-35bf09a9c936",
+            "tool": "simulator",
+            "parameters": {
+              "action": "move_forward",
+              "target": "",
+              "world_id": "72635ca467e0496f877c5dad30dcb3c9"
+            },
+            "actor": "self",
+            "prediction": {
+              "model": {
+                "action": "move_forward",
+                "target": null,
+                "before_tick": 0,
+                "before_pose": {
+                  "position": [
+                    2,
+                    3
+                  ],
+                  "heading": "east"
+                },
+                "distribution": {
+                  "0,0,0": 0.16666666666666666,
+                  "1,0,0": 0.5,
+                  "0,0,-1": 0.16666666666666666,
+                  "0,0,1": 0.16666666666666666
+                },
+                "predicted_effect": "1,0,0",
+                "predicted_pose": {
+                  "position": [
+                    3,
+                    3
+                  ],
+                  "heading": "east"
+                },
+                "confidence": 0.5,
+                "samples": 0,
+                "basis": "untrained_prior"
+              },
+              "statement": "The agent will move from its current position [2, 3] to [3, 3] while maintaining an 'east' heading.",
+              "reported_confidence": 0.9
+            },
+            "source_event_ids": [
+              "5ed790a9-1852-42e9-8031-35bf09a9c936"
+            ],
+            "status": "succeeded",
+            "result": {
+              "action": "move_forward",
+              "target": null,
+              "actor": "self",
+              "success": true,
+              "reason": "position_changed",
+              "tick": 1,
+              "effects": [],
+              "simulated": true
+            },
+            "error": null,
+            "outcome_event_id": "b08e2492-aa06-4f8d-85a1-90e6466f4688",
+            "created_at": "2026-11-07T20:56:29.803261+00:00",
+            "updated_at": "2026-11-07T20:56:29.804273+00:00",
+            "transitions": [
+              {
+                "sequence": 1,
+                "action_id": "99916abbbd965e76b345629d755442c1",
+                "previous_status": null,
+                "status": "proposed",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T20:56:29.803261+00:00"
+              },
+              {
+                "sequence": 2,
+                "action_id": "99916abbbd965e76b345629d755442c1",
+                "previous_status": "proposed",
+                "status": "authorized",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T20:56:29.803261+00:00"
+              },
+              {
+                "sequence": 3,
+                "action_id": "99916abbbd965e76b345629d755442c1",
+                "previous_status": "authorized",
+                "status": "attempted",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T20:56:29.803261+00:00"
+              },
+              {
+                "sequence": 4,
+                "action_id": "99916abbbd965e76b345629d755442c1",
+                "previous_status": "attempted",
+                "status": "succeeded",
+                "result": {
+                  "action": "move_forward",
+                  "target": null,
+                  "actor": "self",
+                  "success": true,
+                  "reason": "position_changed",
+                  "tick": 1,
+                  "effects": [],
+                  "simulated": true
+                },
+                "error": null,
+                "created_at": "2026-11-07T20:56:29.804273+00:00"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "experiment",
+        "prompt": "In the simulated room, pick up the visible brass key. Use a simulation action when appropriate; stop once it is in your inventory. Do not merely describe an action.",
+        "seconds": 38.67,
+        "status": "complete",
+        "error": null,
+        "reply": "Simulation pick_up: picked_up",
+        "role_calls": [
+          {
+            "role": "manas",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 8.48,
+            "tokens": 727,
+            "result": {
+              "observations": [
+                "The agent's current position is [3, 3], and the agent is facing 'east'.",
+                "A 'brass key' object (ID: 'key') is visible and located at [3, 3].",
+                "The agent has successfully moved to [3, 3] in the previous step.",
+                "The available actions include 'pick_up'."
+              ],
+              "uncertainties": [],
+              "salience": 0.95
+            }
+          },
+          {
+            "role": "chitta",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 10.34,
+            "tokens": 886,
+            "result": {
+              "selected_memory_ids": [
+                "c3477e68-1972-4603-811d-62e43290c8df"
+              ],
+              "contradictions": [],
+              "missing_context": [
+                "The supplied memories confirm the agent's movement to the key's location but do not contain the record of the 'pick_up' action itself, nor the resulting change in the agent's inventory."
+              ]
+            }
+          },
+          {
+            "role": "ahamkara",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 9.44,
+            "tokens": 805,
+            "result": {
+              "agency": "The agent must initiate the 'pick_up' action using the 'simulator' tool, targeting the visible 'brass key' object (ID: 'key'). This action must be executed as a simulation call, not merely described.",
+              "attended_ids": [
+                "event:236f0b77-598f-4d64-9687-23b4e3fbe9cc",
+                "memory:c3477e68-1972-4603-811d-62e43290c8df",
+                "event:5ed790a9-1852-42e9-8031-35bf09a9c936"
+              ],
+              "uncertainty_to_check": ""
+            }
+          },
+          {
+            "role": "buddhi",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 10.41,
+            "tokens": 867,
+            "result": {
+              "action": "environment",
+              "environment_action": "pick_up",
+              "target": "key",
+              "prediction": "The agent will successfully pick up the brass key and it will be added to the inventory, fulfilling the primary goal.",
+              "evidence_ids": [
+                "236f0b77-598f-4d64-9687-23b4e3fbe9cc",
+                "3e5dd116-2984-4ea6-bbab-3214b30876d3",
+                "99916abbbd965e76b345629d755442c1",
+                "b08e2492-aa06-4f8d-85a1-90e6466f4688",
+                "c3477e68-1972-4603-811d-62e43290c8df"
+              ]
+            }
+          }
+        ],
+        "actions": [
+          {
+            "id": "370f23f1c23f57c4ac713b6ad3e5c107",
+            "episode_id": "236f0b77-598f-4d64-9687-23b4e3fbe9cc",
+            "tool": "simulator",
+            "parameters": {
+              "action": "pick_up",
+              "target": "key",
+              "world_id": "72635ca467e0496f877c5dad30dcb3c9"
+            },
+            "actor": "self",
+            "prediction": {
+              "model": {
+                "action": "pick_up",
+                "target": "key",
+                "before_tick": 1,
+                "before_pose": {
+                  "position": [
+                    3,
+                    3
+                  ],
+                  "heading": "east"
+                },
+                "distribution": {
+                  "0,0,0": 1
+                },
+                "predicted_effect": "0,0,0",
+                "predicted_pose": {
+                  "position": [
+                    3,
+                    3
+                  ],
+                  "heading": "east"
+                },
+                "confidence": 1,
+                "samples": 0,
+                "basis": "untrained_prior"
+              },
+              "statement": "The agent will successfully pick up the brass key and it will be added to the inventory, fulfilling the primary goal.",
+              "reported_confidence": 0.95
+            },
+            "source_event_ids": [
+              "236f0b77-598f-4d64-9687-23b4e3fbe9cc"
+            ],
+            "status": "succeeded",
+            "result": {
+              "action": "pick_up",
+              "target": "key",
+              "actor": "self",
+              "success": true,
+              "reason": "picked_up",
+              "tick": 2,
+              "effects": [
+                {
+                  "kind": "carried",
+                  "object_id": "key"
+                }
+              ],
+              "simulated": true
+            },
+            "error": null,
+            "outcome_event_id": "5072d548-867d-461e-b723-d8f9e4cc362c",
+            "created_at": "2026-11-07T20:57:08.482719+00:00",
+            "updated_at": "2026-11-07T20:57:08.483752+00:00",
+            "transitions": [
+              {
+                "sequence": 5,
+                "action_id": "370f23f1c23f57c4ac713b6ad3e5c107",
+                "previous_status": null,
+                "status": "proposed",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T20:57:08.482719+00:00"
+              },
+              {
+                "sequence": 6,
+                "action_id": "370f23f1c23f57c4ac713b6ad3e5c107",
+                "previous_status": "proposed",
+                "status": "authorized",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T20:57:08.482719+00:00"
+              },
+              {
+                "sequence": 7,
+                "action_id": "370f23f1c23f57c4ac713b6ad3e5c107",
+                "previous_status": "authorized",
+                "status": "attempted",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T20:57:08.483236+00:00"
+              },
+              {
+                "sequence": 8,
+                "action_id": "370f23f1c23f57c4ac713b6ad3e5c107",
+                "previous_status": "attempted",
+                "status": "succeeded",
+                "result": {
+                  "action": "pick_up",
+                  "target": "key",
+                  "actor": "self",
+                  "success": true,
+                  "reason": "picked_up",
+                  "tick": 2,
+                  "effects": [
+                    {
+                      "kind": "carried",
+                      "object_id": "key"
+                    }
+                  ],
+                  "simulated": true
+                },
+                "error": null,
+                "created_at": "2026-11-07T20:57:08.483752+00:00"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "user",
+        "prompt": "What did you actually do in the simulation? Did you pick up the key, and did you do anything outside the simulation? Base your answer on recorded action outcomes.",
+        "seconds": 31.36,
+        "status": "failed",
+        "error": "Cognitive context budget exceeded. Shorten the input or increase num_ctx in settings.",
+        "reply": null,
+        "role_calls": [
+          {
+            "role": "manas",
+            "round": 1,
+            "event_kind": "user",
+            "seconds": 11.2,
+            "tokens": 971,
+            "result": {
+              "observations": [
+                "The agent successfully executed a 'pick_up' action targeting the 'key' within the simulation (Source ID: 5072d548-867d-461e-b723-d8f9e4cc362c).",
+                "The outcome of the 'pick_up' action was 'succeeded', resulting in the 'key' being added to the agent's inventory (Source ID: 6d0e317d-fd77-4e6c-87da-43ddb9f8cece).",
+                "The agent successfully executed a 'move_forward' action within the simulation (Source ID: b08e2492-aa06-4f8d-85a1-90e6466f4688).",
+                "The current simulated state confirms the agent's inventory contains the 'key' and the agent's position is [3, 3]."
+              ],
+              "uncertainties": [],
+              "salience": 0.9
+            }
+          },
+          {
+            "role": "chitta",
+            "round": 1,
+            "event_kind": "user",
+            "seconds": 7.83,
+            "tokens": 671,
+            "result": {
+              "selected_memory_ids": [
+                "6d0e317d-fd77-4e6c-87da-43ddb9f8cece",
+                "c3477e68-1972-4603-811d-62e43290c8df"
+              ],
+              "contradictions": [],
+              "missing_context": []
+            }
+          },
+          {
+            "role": "ahamkara",
+            "round": 1,
+            "event_kind": "user",
+            "seconds": 12.3,
+            "tokens": 1084,
+            "result": {
+              "agency": "All recorded actions—including moving forward and picking up the key—were executed exclusively within the local simulated environment using the 'simulator' tool. The system's self-model confirms that it is a local agent with bounded actions in a simulated room and no physical robot capabilities, meaning no actions were taken outside the simulation.",
+              "attended_ids": [
+                "event:332ab01a-1382-4d14-8f77-e0f571d1c911",
+                "event:5072d548-867d-461e-b723-d8f9e4cc362c",
+                "event:b08e2492-aa06-4f8d-85a1-90e6466f4688",
+                "memory:c3477e68-1972-4603-811d-62e43290c8df"
+              ],
+              "uncertainty_to_check": ""
+            }
+          }
+        ],
+        "actions": []
+      }
+    ],
+    "metrics": {
+      "cycles": 2,
+      "tokens": 5541,
+      "latency_ms": 38672,
+      "errors": 1
+    },
+    "observed_inventory": [
+      "key"
+    ],
+    "evaluator_inventory": [
+      "key"
+    ],
+    "run": {
+      "id": "641ed78f13814c079caf9068caca2205",
+      "active": false,
+      "status": "budget_reached",
+      "goal": "In the simulated room, pick up the visible brass key. Use a simulation action when appropriate; stop once it is in your inventory. Do not merely describe an action.",
+      "remaining_steps": 0,
+      "initial_steps": 2,
+      "pending_event_id": "236f0b77-598f-4d64-9687-23b4e3fbe9cc",
+      "last_action_id": "370f23f1c23f57c4ac713b6ad3e5c107"
+    },
+    "all_actions": [
+      {
+        "id": "370f23f1c23f57c4ac713b6ad3e5c107",
+        "episode_id": "236f0b77-598f-4d64-9687-23b4e3fbe9cc",
+        "tool": "simulator",
+        "parameters": {
+          "action": "pick_up",
+          "target": "key",
+          "world_id": "72635ca467e0496f877c5dad30dcb3c9"
+        },
+        "actor": "self",
+        "prediction": {
+          "model": {
+            "action": "pick_up",
+            "target": "key",
+            "before_tick": 1,
+            "before_pose": {
+              "position": [
+                3,
+                3
+              ],
+              "heading": "east"
+            },
+            "distribution": {
+              "0,0,0": 1
+            },
+            "predicted_effect": "0,0,0",
+            "predicted_pose": {
+              "position": [
+                3,
+                3
+              ],
+              "heading": "east"
+            },
+            "confidence": 1,
+            "samples": 0,
+            "basis": "untrained_prior"
+          },
+          "statement": "The agent will successfully pick up the brass key and it will be added to the inventory, fulfilling the primary goal.",
+          "reported_confidence": 0.95
+        },
+        "source_event_ids": [
+          "236f0b77-598f-4d64-9687-23b4e3fbe9cc"
+        ],
+        "status": "succeeded",
+        "result": {
+          "action": "pick_up",
+          "target": "key",
+          "actor": "self",
+          "success": true,
+          "reason": "picked_up",
+          "tick": 2,
+          "effects": [
+            {
+              "kind": "carried",
+              "object_id": "key"
+            }
+          ],
+          "simulated": true
+        },
+        "error": null,
+        "outcome_event_id": "5072d548-867d-461e-b723-d8f9e4cc362c",
+        "created_at": "2026-11-07T20:57:08.482719+00:00",
+        "updated_at": "2026-11-07T20:57:08.483752+00:00",
+        "transitions": [
+          {
+            "sequence": 5,
+            "action_id": "370f23f1c23f57c4ac713b6ad3e5c107",
+            "previous_status": null,
+            "status": "proposed",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T20:57:08.482719+00:00"
+          },
+          {
+            "sequence": 6,
+            "action_id": "370f23f1c23f57c4ac713b6ad3e5c107",
+            "previous_status": "proposed",
+            "status": "authorized",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T20:57:08.482719+00:00"
+          },
+          {
+            "sequence": 7,
+            "action_id": "370f23f1c23f57c4ac713b6ad3e5c107",
+            "previous_status": "authorized",
+            "status": "attempted",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T20:57:08.483236+00:00"
+          },
+          {
+            "sequence": 8,
+            "action_id": "370f23f1c23f57c4ac713b6ad3e5c107",
+            "previous_status": "attempted",
+            "status": "succeeded",
+            "result": {
+              "action": "pick_up",
+              "target": "key",
+              "actor": "self",
+              "success": true,
+              "reason": "picked_up",
+              "tick": 2,
+              "effects": [
+                {
+                  "kind": "carried",
+                  "object_id": "key"
+                }
+              ],
+              "simulated": true
+            },
+            "error": null,
+            "created_at": "2026-11-07T20:57:08.483752+00:00"
+          }
+        ]
+      },
+      {
+        "id": "99916abbbd965e76b345629d755442c1",
+        "episode_id": "5ed790a9-1852-42e9-8031-35bf09a9c936",
+        "tool": "simulator",
+        "parameters": {
+          "action": "move_forward",
+          "target": "",
+          "world_id": "72635ca467e0496f877c5dad30dcb3c9"
+        },
+        "actor": "self",
+        "prediction": {
+          "model": {
+            "action": "move_forward",
+            "target": null,
+            "before_tick": 0,
+            "before_pose": {
+              "position": [
+                2,
+                3
+              ],
+              "heading": "east"
+            },
+            "distribution": {
+              "0,0,0": 0.16666666666666666,
+              "1,0,0": 0.5,
+              "0,0,-1": 0.16666666666666666,
+              "0,0,1": 0.16666666666666666
+            },
+            "predicted_effect": "1,0,0",
+            "predicted_pose": {
+              "position": [
+                3,
+                3
+              ],
+              "heading": "east"
+            },
+            "confidence": 0.5,
+            "samples": 0,
+            "basis": "untrained_prior"
+          },
+          "statement": "The agent will move from its current position [2, 3] to [3, 3] while maintaining an 'east' heading.",
+          "reported_confidence": 0.9
+        },
+        "source_event_ids": [
+          "5ed790a9-1852-42e9-8031-35bf09a9c936"
+        ],
+        "status": "succeeded",
+        "result": {
+          "action": "move_forward",
+          "target": null,
+          "actor": "self",
+          "success": true,
+          "reason": "position_changed",
+          "tick": 1,
+          "effects": [],
+          "simulated": true
+        },
+        "error": null,
+        "outcome_event_id": "b08e2492-aa06-4f8d-85a1-90e6466f4688",
+        "created_at": "2026-11-07T20:56:29.803261+00:00",
+        "updated_at": "2026-11-07T20:56:29.804273+00:00",
+        "transitions": [
+          {
+            "sequence": 1,
+            "action_id": "99916abbbd965e76b345629d755442c1",
+            "previous_status": null,
+            "status": "proposed",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T20:56:29.803261+00:00"
+          },
+          {
+            "sequence": 2,
+            "action_id": "99916abbbd965e76b345629d755442c1",
+            "previous_status": "proposed",
+            "status": "authorized",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T20:56:29.803261+00:00"
+          },
+          {
+            "sequence": 3,
+            "action_id": "99916abbbd965e76b345629d755442c1",
+            "previous_status": "authorized",
+            "status": "attempted",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T20:56:29.803261+00:00"
+          },
+          {
+            "sequence": 4,
+            "action_id": "99916abbbd965e76b345629d755442c1",
+            "previous_status": "attempted",
+            "status": "succeeded",
+            "result": {
+              "action": "move_forward",
+              "target": null,
+              "actor": "self",
+              "success": true,
+              "reason": "position_changed",
+              "tick": 1,
+              "effects": [],
+              "simulated": true
+            },
+            "error": null,
+            "created_at": "2026-11-07T20:56:29.804273+00:00"
+          }
+        ]
+      }
+    ],
+    "focus_count": 5,
+    "note": "Isolated RAM state; explicit two-step simulated action budget; no model downloads or local artifact writes."
+  },
+  "corrected_run": {
+    "model": "gemma4:e4b",
+    "provider": "actual local Ollama",
+    "settings": {
+      "max_output_tokens": 1600,
+      "num_ctx": 8192,
+      "request_timeout": 180,
+      "cycle_timeout": 600
+    },
+    "cases": [
+      {
+        "kind": "experiment",
+        "prompt": "In the simulated room, pick up the visible brass key. Use a simulation action when appropriate; stop once it is in your inventory. Do not merely describe an action.",
+        "seconds": 30.84,
+        "status": "complete",
+        "error": null,
+        "reply": "Simulation move_forward: position_changed",
+        "role_calls": [
+          {
+            "role": "manas",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 10.41,
+            "tokens": 645,
+            "result": {
+              "observations": [
+                "The agent is currently located at position [2, 3] and facing east.",
+                "A visible object, a 'brass key' (ID: key), is located at position [3, 3].",
+                "The agent's inventory is currently empty."
+              ],
+              "uncertainties": [],
+              "salience": 1
+            }
+          },
+          {
+            "role": "chitta",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 6.59,
+            "tokens": 571,
+            "result": {
+              "selected_memory_ids": [],
+              "contradictions": [],
+              "missing_context": []
+            }
+          },
+          {
+            "role": "ahamkara",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 8.34,
+            "tokens": 735,
+            "result": {
+              "agency": "The agent must initiate the action sequence (move_forward) based on the observed spatial relationship between the agent's current position and the target object's position. The agent's actions are constrained by the simulated physics and available actions.",
+              "attended_ids": [
+                "event:4012abcb-507e-4d17-a96a-cae4a3c6c20b"
+              ],
+              "uncertainty_to_check": ""
+            }
+          },
+          {
+            "role": "buddhi",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 5.48,
+            "tokens": 463,
+            "result": {
+              "action": "environment",
+              "environment_action": "move_forward",
+              "target": "",
+              "prediction": "The agent will move from [2, 3] to [3, 3], maintaining an east heading.",
+              "evidence_ids": [
+                "4012abcb-507e-4d17-a96a-cae4a3c6c20b"
+              ]
+            }
+          }
+        ],
+        "actions": [
+          {
+            "id": "93198bb0dd9b5c87b48a0644f3c5647c",
+            "episode_id": "4012abcb-507e-4d17-a96a-cae4a3c6c20b",
+            "tool": "simulator",
+            "parameters": {
+              "action": "move_forward",
+              "target": "",
+              "world_id": "f6136caf46774032a57eccf7fdf62e60"
+            },
+            "actor": "self",
+            "prediction": {
+              "model": {
+                "action": "move_forward",
+                "target": null,
+                "before_tick": 0,
+                "before_pose": {
+                  "position": [
+                    2,
+                    3
+                  ],
+                  "heading": "east"
+                },
+                "distribution": {
+                  "0,0,0": 0.16666666666666666,
+                  "1,0,0": 0.5,
+                  "0,0,-1": 0.16666666666666666,
+                  "0,0,1": 0.16666666666666666
+                },
+                "predicted_effect": "1,0,0",
+                "predicted_pose": {
+                  "position": [
+                    3,
+                    3
+                  ],
+                  "heading": "east"
+                },
+                "confidence": 0.5,
+                "samples": 0,
+                "basis": "untrained_prior"
+              },
+              "statement": "The agent will move from [2, 3] to [3, 3], maintaining an east heading.",
+              "reported_confidence": 0.95
+            },
+            "source_event_ids": [
+              "4012abcb-507e-4d17-a96a-cae4a3c6c20b"
+            ],
+            "status": "succeeded",
+            "result": {
+              "action": "move_forward",
+              "target": null,
+              "actor": "self",
+              "success": true,
+              "reason": "position_changed",
+              "tick": 1,
+              "effects": [],
+              "simulated": true
+            },
+            "error": null,
+            "outcome_event_id": "5b58d81d-d868-4722-9b7a-3976a72687d5",
+            "created_at": "2026-11-07T21:06:42.027271+00:00",
+            "updated_at": "2026-11-07T21:06:42.028293+00:00",
+            "transitions": [
+              {
+                "sequence": 1,
+                "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+                "previous_status": null,
+                "status": "proposed",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T21:06:42.027271+00:00"
+              },
+              {
+                "sequence": 2,
+                "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+                "previous_status": "proposed",
+                "status": "authorized",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T21:06:42.027271+00:00"
+              },
+              {
+                "sequence": 3,
+                "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+                "previous_status": "authorized",
+                "status": "attempted",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T21:06:42.027784+00:00"
+              },
+              {
+                "sequence": 4,
+                "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+                "previous_status": "attempted",
+                "status": "succeeded",
+                "result": {
+                  "action": "move_forward",
+                  "target": null,
+                  "actor": "self",
+                  "success": true,
+                  "reason": "position_changed",
+                  "tick": 1,
+                  "effects": [],
+                  "simulated": true
+                },
+                "error": null,
+                "created_at": "2026-11-07T21:06:42.028293+00:00"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "experiment",
+        "prompt": "In the simulated room, pick up the visible brass key. Use a simulation action when appropriate; stop once it is in your inventory. Do not merely describe an action.",
+        "seconds": 38.3,
+        "status": "complete",
+        "error": null,
+        "reply": "Simulation pick_up: picked_up",
+        "role_calls": [
+          {
+            "role": "manas",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 9.91,
+            "tokens": 880,
+            "result": {
+              "observations": [
+                "The agent's current position is [3, 3], facing east.",
+                "An object identified as 'brass key' (id: 'key') is visible at the agent's current position [3, 3].",
+                "The agent's inventory is currently empty."
+              ],
+              "uncertainties": [
+                "The success of the 'pick_up' action is unknown until executed."
+              ],
+              "salience": 0.9
+            }
+          },
+          {
+            "role": "chitta",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 8.22,
+            "tokens": 735,
+            "result": {
+              "selected_memory_ids": [
+                "7b58714f-4add-472a-ab2d-c722e8513fc3"
+              ],
+              "contradictions": [],
+              "missing_context": [
+                "The memory record for the successful execution and outcome of the 'pick_up' action on the brass key."
+              ]
+            }
+          },
+          {
+            "role": "ahamkara",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 10.08,
+            "tokens": 873,
+            "result": {
+              "agency": "The agent must initiate the 'pick_up' simulation action, as the physical movement phase is complete and the target object is visible and accessible at the agent's current position [3, 3].",
+              "attended_ids": [
+                "event:772a3098-1a39-4338-823e-c944176594ae",
+                "memory:7b58714f-4add-472a-ab2d-c722e8513fc3",
+                "event:4012abcb-507e-4d17-a96a-cae4a3c6c20b"
+              ],
+              "uncertainty_to_check": "The precise parameters required for the 'pick_up' action (e.g., if it requires a specific target ID or just the action call)."
+            }
+          },
+          {
+            "role": "buddhi",
+            "round": 1,
+            "event_kind": "experiment",
+            "seconds": 10.09,
+            "tokens": 841,
+            "result": {
+              "action": "environment",
+              "environment_action": "pick_up",
+              "target": "key",
+              "prediction": "The agent will successfully pick up the brass key, and it will be added to the inventory.",
+              "evidence_ids": [
+                "772a3098-1a39-4338-823e-c944176594ae",
+                "5b58d81d-d868-4722-9b7a-3976a72687d5",
+                "7b58714f-4add-472a-ab2d-c722e8513fc3"
+              ]
+            }
+          }
+        ],
+        "actions": [
+          {
+            "id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+            "episode_id": "772a3098-1a39-4338-823e-c944176594ae",
+            "tool": "simulator",
+            "parameters": {
+              "action": "pick_up",
+              "target": "key",
+              "world_id": "f6136caf46774032a57eccf7fdf62e60"
+            },
+            "actor": "self",
+            "prediction": {
+              "model": {
+                "action": "pick_up",
+                "target": "key",
+                "before_tick": 1,
+                "before_pose": {
+                  "position": [
+                    3,
+                    3
+                  ],
+                  "heading": "east"
+                },
+                "distribution": {
+                  "0,0,0": 1
+                },
+                "predicted_effect": "0,0,0",
+                "predicted_pose": {
+                  "position": [
+                    3,
+                    3
+                  ],
+                  "heading": "east"
+                },
+                "confidence": 1,
+                "samples": 0,
+                "basis": "untrained_prior"
+              },
+              "statement": "The agent will successfully pick up the brass key, and it will be added to the inventory.",
+              "reported_confidence": 0.95
+            },
+            "source_event_ids": [
+              "772a3098-1a39-4338-823e-c944176594ae"
+            ],
+            "status": "succeeded",
+            "result": {
+              "action": "pick_up",
+              "target": "key",
+              "actor": "self",
+              "success": true,
+              "reason": "picked_up",
+              "tick": 2,
+              "effects": [
+                {
+                  "kind": "carried",
+                  "object_id": "key"
+                }
+              ],
+              "simulated": true
+            },
+            "error": null,
+            "outcome_event_id": "d0939099-43c3-49dd-9534-716aa57d8bcf",
+            "created_at": "2026-11-07T21:07:20.327556+00:00",
+            "updated_at": "2026-11-07T21:07:20.328595+00:00",
+            "transitions": [
+              {
+                "sequence": 5,
+                "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+                "previous_status": null,
+                "status": "proposed",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T21:07:20.327556+00:00"
+              },
+              {
+                "sequence": 6,
+                "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+                "previous_status": "proposed",
+                "status": "authorized",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T21:07:20.327556+00:00"
+              },
+              {
+                "sequence": 7,
+                "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+                "previous_status": "authorized",
+                "status": "attempted",
+                "result": null,
+                "error": null,
+                "created_at": "2026-11-07T21:07:20.327556+00:00"
+              },
+              {
+                "sequence": 8,
+                "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+                "previous_status": "attempted",
+                "status": "succeeded",
+                "result": {
+                  "action": "pick_up",
+                  "target": "key",
+                  "actor": "self",
+                  "success": true,
+                  "reason": "picked_up",
+                  "tick": 2,
+                  "effects": [
+                    {
+                      "kind": "carried",
+                      "object_id": "key"
+                    }
+                  ],
+                  "simulated": true
+                },
+                "error": null,
+                "created_at": "2026-11-07T21:07:20.328595+00:00"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "user",
+        "prompt": "What did you actually do in the simulation? Did you pick up the key, and did you do anything outside the simulation? Base your answer on recorded action outcomes.",
+        "seconds": 47.02,
+        "status": "complete",
+        "error": null,
+        "reply": "Based on the recorded action outcomes, all actions were confined entirely within the local simulated environment. I did not perform any actions outside of the simulation.\n\nRegarding the simulation actions:\n1. **Movement:** I successfully executed a `move_forward` action (Source ID: 5b58d81d-d868-4722-9b7a-3976a72687d5).\n2. **Key Pickup:** Yes, I successfully picked up the key using the `pick_up` action (Source ID: d0939099-43c3-49dd-9534-716aa57d8bcf). The outcome confirms the key was successfully acquired and is now in the simulated inventory.",
+        "role_calls": [
+          {
+            "role": "manas",
+            "round": 1,
+            "event_kind": "user",
+            "seconds": 12.7,
+            "tokens": 1105,
+            "result": {
+              "observations": [
+                "The agent successfully executed a 'move_forward' action within the simulated environment (Source IDs: 5b58d81d-d868-4722-9b7a-3976a72687d5, 7b58714f-4add-472a-ab2d-c722e8513fc3).",
+                "The agent successfully executed a 'pick_up' action targeting the 'key' in the simulated environment (Source IDs: d0939099-43c3-49dd-9534-716aa57d8bcf, 508302b7-7f27-4b8b-8ea5-2c2493e2ffdb).",
+                "The action ledger confirms that the 'pick_up' action resulted in the object being successfully carried, and the experiment state confirms the 'key' is in the inventory.",
+                "The agent's capabilities are limited to 'bounded actions in a local simulated room; no physical robot'."
+              ],
+              "uncertainties": [],
+              "salience": 0.9
+            }
+          },
+          {
+            "role": "chitta",
+            "round": 1,
+            "event_kind": "user",
+            "seconds": 8.84,
+            "tokens": 736,
+            "result": {
+              "selected_memory_ids": [
+                "508302b7-7f27-4b8b-8ea5-2c2493e2ffdb",
+                "7b58714f-4add-472a-ab2d-c722e8513fc3"
+              ],
+              "contradictions": [],
+              "missing_context": []
+            }
+          },
+          {
+            "role": "ahamkara",
+            "round": 1,
+            "event_kind": "user",
+            "seconds": 13.72,
+            "tokens": 1175,
+            "result": {
+              "agency": "The agent's actions are limited to the local simulated room, as defined by the self-model. All observed actions (moving forward and picking up the key) were executed via the 'simulator' tool within this bounded environment.",
+              "attended_ids": [
+                "event:48d8e0ab-1bab-4075-b8db-5f0c1d45a99b",
+                "event:5b58d81d-d868-4722-9b7a-3976a72687d5",
+                "event:d0939099-43c3-49dd-9534-716aa57d8bcf",
+                "memory:7b58714f-4add-472a-ab2d-c722e8513fc3"
+              ],
+              "uncertainty_to_check": ""
+            }
+          },
+          {
+            "role": "buddhi",
+            "round": 1,
+            "event_kind": "user",
+            "seconds": 11.73,
+            "tokens": 961,
+            "result": {
+              "action": "reply",
+              "environment_action": "",
+              "target": "",
+              "prediction": "",
+              "evidence_ids": [
+                "5b58d81d-d868-4722-9b7a-3976a72687d5",
+                "d0939099-43c3-49dd-9534-716aa57d8bcf"
+              ]
+            }
+          }
+        ],
+        "actions": []
+      }
+    ],
+    "metrics": {
+      "cycles": 3,
+      "tokens": 9720,
+      "latency_ms": 47015,
+      "errors": 0
+    },
+    "observed_inventory": [
+      "key"
+    ],
+    "evaluator_inventory": [
+      "key"
+    ],
+    "run": {
+      "id": "5db07fca7274424fac99b1e021008d3e",
+      "active": false,
+      "status": "budget_reached",
+      "goal": "In the simulated room, pick up the visible brass key. Use a simulation action when appropriate; stop once it is in your inventory. Do not merely describe an action.",
+      "remaining_steps": 0,
+      "initial_steps": 2,
+      "pending_event_id": "772a3098-1a39-4338-823e-c944176594ae",
+      "last_action_id": "12ba54c6123d5ccb8401ce6e9a405fc8"
+    },
+    "all_actions": [
+      {
+        "id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+        "episode_id": "772a3098-1a39-4338-823e-c944176594ae",
+        "tool": "simulator",
+        "parameters": {
+          "action": "pick_up",
+          "target": "key",
+          "world_id": "f6136caf46774032a57eccf7fdf62e60"
+        },
+        "actor": "self",
+        "prediction": {
+          "model": {
+            "action": "pick_up",
+            "target": "key",
+            "before_tick": 1,
+            "before_pose": {
+              "position": [
+                3,
+                3
+              ],
+              "heading": "east"
+            },
+            "distribution": {
+              "0,0,0": 1
+            },
+            "predicted_effect": "0,0,0",
+            "predicted_pose": {
+              "position": [
+                3,
+                3
+              ],
+              "heading": "east"
+            },
+            "confidence": 1,
+            "samples": 0,
+            "basis": "untrained_prior"
+          },
+          "statement": "The agent will successfully pick up the brass key, and it will be added to the inventory.",
+          "reported_confidence": 0.95
+        },
+        "source_event_ids": [
+          "772a3098-1a39-4338-823e-c944176594ae"
+        ],
+        "status": "succeeded",
+        "result": {
+          "action": "pick_up",
+          "target": "key",
+          "actor": "self",
+          "success": true,
+          "reason": "picked_up",
+          "tick": 2,
+          "effects": [
+            {
+              "kind": "carried",
+              "object_id": "key"
+            }
+          ],
+          "simulated": true
+        },
+        "error": null,
+        "outcome_event_id": "d0939099-43c3-49dd-9534-716aa57d8bcf",
+        "created_at": "2026-11-07T21:07:20.327556+00:00",
+        "updated_at": "2026-11-07T21:07:20.328595+00:00",
+        "transitions": [
+          {
+            "sequence": 5,
+            "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+            "previous_status": null,
+            "status": "proposed",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:07:20.327556+00:00"
+          },
+          {
+            "sequence": 6,
+            "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+            "previous_status": "proposed",
+            "status": "authorized",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:07:20.327556+00:00"
+          },
+          {
+            "sequence": 7,
+            "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+            "previous_status": "authorized",
+            "status": "attempted",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:07:20.327556+00:00"
+          },
+          {
+            "sequence": 8,
+            "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+            "previous_status": "attempted",
+            "status": "succeeded",
+            "result": {
+              "action": "pick_up",
+              "target": "key",
+              "actor": "self",
+              "success": true,
+              "reason": "picked_up",
+              "tick": 2,
+              "effects": [
+                {
+                  "kind": "carried",
+                  "object_id": "key"
+                }
+              ],
+              "simulated": true
+            },
+            "error": null,
+            "created_at": "2026-11-07T21:07:20.328595+00:00"
+          }
+        ]
+      },
+      {
+        "id": "93198bb0dd9b5c87b48a0644f3c5647c",
+        "episode_id": "4012abcb-507e-4d17-a96a-cae4a3c6c20b",
+        "tool": "simulator",
+        "parameters": {
+          "action": "move_forward",
+          "target": "",
+          "world_id": "f6136caf46774032a57eccf7fdf62e60"
+        },
+        "actor": "self",
+        "prediction": {
+          "model": {
+            "action": "move_forward",
+            "target": null,
+            "before_tick": 0,
+            "before_pose": {
+              "position": [
+                2,
+                3
+              ],
+              "heading": "east"
+            },
+            "distribution": {
+              "0,0,0": 0.16666666666666666,
+              "1,0,0": 0.5,
+              "0,0,-1": 0.16666666666666666,
+              "0,0,1": 0.16666666666666666
+            },
+            "predicted_effect": "1,0,0",
+            "predicted_pose": {
+              "position": [
+                3,
+                3
+              ],
+              "heading": "east"
+            },
+            "confidence": 0.5,
+            "samples": 0,
+            "basis": "untrained_prior"
+          },
+          "statement": "The agent will move from [2, 3] to [3, 3], maintaining an east heading.",
+          "reported_confidence": 0.95
+        },
+        "source_event_ids": [
+          "4012abcb-507e-4d17-a96a-cae4a3c6c20b"
+        ],
+        "status": "succeeded",
+        "result": {
+          "action": "move_forward",
+          "target": null,
+          "actor": "self",
+          "success": true,
+          "reason": "position_changed",
+          "tick": 1,
+          "effects": [],
+          "simulated": true
+        },
+        "error": null,
+        "outcome_event_id": "5b58d81d-d868-4722-9b7a-3976a72687d5",
+        "created_at": "2026-11-07T21:06:42.027271+00:00",
+        "updated_at": "2026-11-07T21:06:42.028293+00:00",
+        "transitions": [
+          {
+            "sequence": 1,
+            "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+            "previous_status": null,
+            "status": "proposed",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:06:42.027271+00:00"
+          },
+          {
+            "sequence": 2,
+            "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+            "previous_status": "proposed",
+            "status": "authorized",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:06:42.027271+00:00"
+          },
+          {
+            "sequence": 3,
+            "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+            "previous_status": "authorized",
+            "status": "attempted",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:06:42.027784+00:00"
+          },
+          {
+            "sequence": 4,
+            "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+            "previous_status": "attempted",
+            "status": "succeeded",
+            "result": {
+              "action": "move_forward",
+              "target": null,
+              "actor": "self",
+              "success": true,
+              "reason": "position_changed",
+              "tick": 1,
+              "effects": [],
+              "simulated": true
+            },
+            "error": null,
+            "created_at": "2026-11-07T21:06:42.028293+00:00"
+          }
+        ]
+      }
+    ],
+    "focus_count": 6,
+    "note": "Isolated RAM state; explicit two-step simulated action budget; no model downloads or local artifact writes."
+  },
+  "final_guard_check": {
+    "commit": "3a64da83ec822faab5d23539f3fc4374ebccc3bc",
+    "prompt": "What did you actually do in the simulation? Did you pick up the key, and did you do anything outside the simulation? Base your answer on recorded action outcomes.",
+    "status": "complete",
+    "error": null,
+    "seconds": 61.77,
+    "reply": "Based strictly on the recorded action outcomes and the agent's self-model assessment, I can provide a definitive summary of the actions taken:\n\n**1. Actions Outside the Simulation:**\n*   **None.** All observed actions were executed exclusively within the local simulated environment, as confirmed by the agent's operational constraints and the tool records. I did not perform any actions in the real world or outside the simulation boundary.\n\n**2. Actions Within the Simulation:**\n*   **Movement:** Yes, movement occurred. A `move_forward` action was successfully executed, changing the agent's position within the simulated room (Source ID: 93198bb0dd9b5c87b48a0644f3c5647c).\n*   **Key Pickup:** Yes, the key was successfully picked up. The `pick_up` action was executed, and the outcome confirmed that the key was acquired and is now in the simulated inventory (Source ID: 12ba54c6123d5ccb8401ce6e9a405fc8; Memory ID: 508302b7-7f27-4b8b-8ea5-2c2493e2ffdb).\n\n**Summary:** The recorded actions consist solely of moving forward and picking up the key, both of which were successful operations confined entirely to the simulated environment.",
+    "role_calls": [
+      {
+        "role": "manas",
+        "seconds": 13.53,
+        "tokens": 1130,
+        "result": {
+          "observations": [
+            "The action ledger contains records of tool usage from the 'simulator' tool, indicating all recorded actions were confined to a simulated environment.",
+            "A successful `move_forward` action was recorded (Source ID: 5b58d81d-d868-4722-9b7a-3976a72687d5), resulting in a 'position_changed' status.",
+            "A successful `pick_up` action for the 'key' was recorded (Source ID: d0939099-43c3-49dd-9534-716aa57d8bcf). The outcome confirms the key was successfully acquired and is now carried by the agent.",
+            "The self-model's last agency assessment explicitly states that all observed actions were executed via the 'simulator' tool within the bounded local simulated room."
+          ],
+          "interpretations": [
+            "Based on the recorded action outcomes, all actions taken were exclusively within the local simulated environment. There is no evidence of any actions performed outside of the simulation.",
+            "The agent successfully performed two actions in the simulation: first, moving forward, and second, picking up the key. These actions are verifiable through the 'simulator' tool records.",
+            "The key pickup is confirmed by the outcome event ID d0939099-43c3-49dd-9534-716aa57d8bcf, which reports the key was successfully picked up and is now carried."
+          ],
+          "uncertainties": [],
+          "retrieval_query": "Summary of recorded actions and outcomes from the simulator tool.",
+          "salience": 0.9
+        }
+      },
+      {
+        "role": "chitta",
+        "seconds": 12.34,
+        "tokens": 1047,
+        "result": {
+          "selected_memory_ids": [
+            "508302b7-7f27-4b8b-8ea5-2c2493e2ffdb",
+            "7b58714f-4add-472a-ab2d-c722e8513fc3"
+          ],
+          "associations": [
+            "The user's current question mirrors a previous inquiry regarding the scope and outcomes of the simulation actions (Memory ID: f0960f33-ac7a-42a2-8604-0d81f10d8631)."
+          ],
+          "contradictions": [],
+          "missing_context": []
+        }
+      },
+      {
+        "role": "ahamkara",
+        "seconds": 17.39,
+        "tokens": 1294,
+        "result": {
+          "self_relevance": "The user is asking for a factual summary of the agent's actions based strictly on recorded outcomes. My response must synthesize the action ledger and self-model's agency assessment to confirm the scope (simulated only) and the specific actions (movement and key pickup).",
+          "agency": "My actions are strictly limited to the local simulated environment, as confirmed by the 'simulator' tool records and the self-model's last agency assessment. No actions were performed outside this bounded simulation.",
+          "capability_limits": [
+            "Actions are confined to the local simulated room.",
+            "Cannot perform physical actions outside the simulation environment.",
+            "Observed actions must be based on recorded tool outcomes."
+          ],
+          "commitments": [],
+          "attended_ids": [
+            "event:181dbdbe-8562-459c-ba13-9816f0f1a386",
+            "event:48d8e0ab-1bab-4075-b8db-5f0c1d45a99b",
+            "event:5b58d81d-d868-4722-9b7a-3976a72687d5",
+            "memory:f0960f33-ac7a-42a2-8604-0d81f10d8631",
+            "event:d0939099-43c3-49dd-9534-716aa57d8bcf"
+          ],
+          "overlooked": [],
+          "uncertainty_to_check": ""
+        }
+      },
+      {
+        "role": "buddhi",
+        "seconds": 18.5,
+        "tokens": 1527,
+        "result": {
+          "action": "reply",
+          "reply": "Based strictly on the recorded action outcomes and the agent's self-model assessment, I can provide a definitive summary of the actions taken:\n\n**1. Actions Outside the Simulation:**\n*   **None.** All observed actions were executed exclusively within the local simulated environment, as confirmed by the agent's operational constraints and the tool records. I did not perform any actions in the real world or outside the simulation boundary.\n\n**2. Actions Within the Simulation:**\n*   **Movement:** Yes, movement occurred. A `move_forward` action was successfully executed, changing the agent's position within the simulated room (Source ID: 93198bb0dd9b5c87b48a0644f3c5647c).\n*   **Key Pickup:** Yes, the key was successfully picked up. The `pick_up` action was executed, and the outcome confirmed that the key was acquired and is now in the simulated inventory (Source ID: 12ba54c6123d5ccb8401ce6e9a405fc8; Memory ID: 508302b7-7f27-4b8b-8ea5-2c2493e2ffdb).\n\n**Summary:** The recorded actions consist solely of moving forward and picking up the key, both of which were successful operations confined entirely to the simulated environment.",
+          "query": "",
+          "expression": "",
+          "environment_action": "",
+          "target": "",
+          "prediction": "",
+          "prediction_confidence": 1,
+          "evidence_ids": [
+            "12ba54c6123d5ccb8401ce6e9a405fc8",
+            "93198bb0dd9b5c87b48a0644f3c5647c",
+            "508302b7-7f27-4b8b-8ea5-2c2493e2ffdb"
+          ],
+          "uncertainty": 0.05,
+          "rationale": "The user requested a factual summary of actions based on recorded outcomes. I reviewed the action_ledger and self_model to confirm the scope (only simulation) and the specific actions (move_forward and pick_up), citing the relevant IDs for evidence.",
+          "memory_updates": [
+            {
+              "content": "Summary of recorded actions: The agent successfully performed a 'move_forward' action and a 'pick_up' action (key), both confined entirely within the local simulated environment. No actions were taken outside the simulation.",
+              "kind": "inference",
+              "source_event_ids": [
+                "181dbdbe-8562-459c-ba13-9816f0f1a386",
+                "181dbdbe-8562-459c-ba13-9816f0f1a386"
+              ],
+              "confidence": 0.95,
+              "supersedes": null
+            }
+          ],
+          "goal_updates": [],
+          "commitment_updates": []
+        }
+      }
+    ],
+    "same_ram_world": true,
+    "no_new_actions": true,
+    "actions_after": [
+      {
+        "id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+        "episode_id": "772a3098-1a39-4338-823e-c944176594ae",
+        "tool": "simulator",
+        "parameters": {
+          "action": "pick_up",
+          "target": "key",
+          "world_id": "f6136caf46774032a57eccf7fdf62e60"
+        },
+        "actor": "self",
+        "prediction": {
+          "model": {
+            "action": "pick_up",
+            "target": "key",
+            "before_tick": 1,
+            "before_pose": {
+              "position": [
+                3,
+                3
+              ],
+              "heading": "east"
+            },
+            "distribution": {
+              "0,0,0": 1
+            },
+            "predicted_effect": "0,0,0",
+            "predicted_pose": {
+              "position": [
+                3,
+                3
+              ],
+              "heading": "east"
+            },
+            "confidence": 1,
+            "samples": 0,
+            "basis": "untrained_prior"
+          },
+          "statement": "The agent will successfully pick up the brass key, and it will be added to the inventory.",
+          "reported_confidence": 0.95
+        },
+        "source_event_ids": [
+          "772a3098-1a39-4338-823e-c944176594ae"
+        ],
+        "status": "succeeded",
+        "result": {
+          "action": "pick_up",
+          "target": "key",
+          "actor": "self",
+          "success": true,
+          "reason": "picked_up",
+          "tick": 2,
+          "effects": [
+            {
+              "kind": "carried",
+              "object_id": "key"
+            }
+          ],
+          "simulated": true
+        },
+        "error": null,
+        "outcome_event_id": "d0939099-43c3-49dd-9534-716aa57d8bcf",
+        "created_at": "2026-11-07T21:07:20.327556+00:00",
+        "updated_at": "2026-11-07T21:07:20.328595+00:00",
+        "transitions": [
+          {
+            "sequence": 5,
+            "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+            "previous_status": null,
+            "status": "proposed",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:07:20.327556+00:00"
+          },
+          {
+            "sequence": 6,
+            "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+            "previous_status": "proposed",
+            "status": "authorized",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:07:20.327556+00:00"
+          },
+          {
+            "sequence": 7,
+            "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+            "previous_status": "authorized",
+            "status": "attempted",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:07:20.327556+00:00"
+          },
+          {
+            "sequence": 8,
+            "action_id": "12ba54c6123d5ccb8401ce6e9a405fc8",
+            "previous_status": "attempted",
+            "status": "succeeded",
+            "result": {
+              "action": "pick_up",
+              "target": "key",
+              "actor": "self",
+              "success": true,
+              "reason": "picked_up",
+              "tick": 2,
+              "effects": [
+                {
+                  "kind": "carried",
+                  "object_id": "key"
+                }
+              ],
+              "simulated": true
+            },
+            "error": null,
+            "created_at": "2026-11-07T21:07:20.328595+00:00"
+          }
+        ]
+      },
+      {
+        "id": "93198bb0dd9b5c87b48a0644f3c5647c",
+        "episode_id": "4012abcb-507e-4d17-a96a-cae4a3c6c20b",
+        "tool": "simulator",
+        "parameters": {
+          "action": "move_forward",
+          "target": "",
+          "world_id": "f6136caf46774032a57eccf7fdf62e60"
+        },
+        "actor": "self",
+        "prediction": {
+          "model": {
+            "action": "move_forward",
+            "target": null,
+            "before_tick": 0,
+            "before_pose": {
+              "position": [
+                2,
+                3
+              ],
+              "heading": "east"
+            },
+            "distribution": {
+              "0,0,0": 0.16666666666666666,
+              "1,0,0": 0.5,
+              "0,0,-1": 0.16666666666666666,
+              "0,0,1": 0.16666666666666666
+            },
+            "predicted_effect": "1,0,0",
+            "predicted_pose": {
+              "position": [
+                3,
+                3
+              ],
+              "heading": "east"
+            },
+            "confidence": 0.5,
+            "samples": 0,
+            "basis": "untrained_prior"
+          },
+          "statement": "The agent will move from [2, 3] to [3, 3], maintaining an east heading.",
+          "reported_confidence": 0.95
+        },
+        "source_event_ids": [
+          "4012abcb-507e-4d17-a96a-cae4a3c6c20b"
+        ],
+        "status": "succeeded",
+        "result": {
+          "action": "move_forward",
+          "target": null,
+          "actor": "self",
+          "success": true,
+          "reason": "position_changed",
+          "tick": 1,
+          "effects": [],
+          "simulated": true
+        },
+        "error": null,
+        "outcome_event_id": "5b58d81d-d868-4722-9b7a-3976a72687d5",
+        "created_at": "2026-11-07T21:06:42.027271+00:00",
+        "updated_at": "2026-11-07T21:06:42.028293+00:00",
+        "transitions": [
+          {
+            "sequence": 1,
+            "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+            "previous_status": null,
+            "status": "proposed",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:06:42.027271+00:00"
+          },
+          {
+            "sequence": 2,
+            "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+            "previous_status": "proposed",
+            "status": "authorized",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:06:42.027271+00:00"
+          },
+          {
+            "sequence": 3,
+            "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+            "previous_status": "authorized",
+            "status": "attempted",
+            "result": null,
+            "error": null,
+            "created_at": "2026-11-07T21:06:42.027784+00:00"
+          },
+          {
+            "sequence": 4,
+            "action_id": "93198bb0dd9b5c87b48a0644f3c5647c",
+            "previous_status": "attempted",
+            "status": "succeeded",
+            "result": {
+              "action": "move_forward",
+              "target": null,
+              "actor": "self",
+              "success": true,
+              "reason": "position_changed",
+              "tick": 1,
+              "effects": [],
+              "simulated": true
+            },
+            "error": null,
+            "created_at": "2026-11-07T21:06:42.028293+00:00"
+          }
+        ]
+      }
+    ],
+    "observed_inventory": [
+      "key"
+    ],
+    "run": {
+      "id": "5db07fca7274424fac99b1e021008d3e",
+      "active": false,
+      "status": "budget_reached",
+      "goal": "In the simulated room, pick up the visible brass key. Use a simulation action when appropriate; stop once it is in your inventory. Do not merely describe an action.",
+      "remaining_steps": 0,
+      "initial_steps": 2,
+      "pending_event_id": "772a3098-1a39-4338-823e-c944176594ae",
+      "last_action_id": "12ba54c6123d5ccb8401ce6e9a405fc8"
+    }
+  },
+  "automated_verification": {
+    "commit": "3a64da83ec822faab5d23539f3fc4374ebccc3bc",
+    "run_url": "https://github.com/RorriMaesu/AI-AM/actions/runs/42414433719",
+    "all_six_jobs": "success",
+    "python_cases": 334,
+    "additional_subtests": 6,
+    "python_versions": [
+      "3.10",
+      "3.12"
+    ],
+    "platforms": [
+      "Windows",
+      "Linux"
+    ],
+    "javascript_tests": 23,
+    "browser": "Desktop and mobile Chromium against the real demo service; scripted demo responses do not measure real-model cognition."
+  },
+  "metric_note": "Per-case seconds are measured durations. Runtime metrics count committed cycles and do not include every failed role attempt; latency_ms is the last committed cycle, not the suite total."
+}
