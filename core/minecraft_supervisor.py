@@ -33,7 +33,7 @@ TERMINAL = {"succeeded", "failed", "cancelled", "outcome_unknown"}
 SENSORY_FIELDS = ("id", "observation_id", "connected", "alive", "health", "food",
                   "position", "inventory", "visible", "nearby", "chat", "time", "enabled",
                   "actions", "active_action", "reflexes", "recipes", "death", "viewer_error",
-                  "oxygen", "dimension", "game_mode", "error")
+                  "oxygen", "dimension", "game_mode", "error", "body_session")
 
 
 class BodyConfig(BaseModel):
@@ -234,7 +234,7 @@ class MinecraftMind(MindEngine):
                        and not self._experiment_stop_requested
                        and event.get("metadata", {}).get("run_id") == run["id"]
                        and observation.get("connected") and observation.get("alive"))
-        senses = {key: value for key, value in observation.items() if key not in {"viewer_error", "error"}}
+        senses = {key: value for key, value in observation.items() if key not in {"viewer_error", "error", "body_session"}}
         payload["experiment"] = {"domain": "minecraft", "initialized": bool(observation),
                                  "observation": senses, "run": run}
         payload["rules"]["environment_enabled"] = enabled

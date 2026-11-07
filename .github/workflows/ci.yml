@@ -49,10 +49,14 @@ jobs:
         run: node --test tests/ui.test.cjs minecraft/test/bridge.test.cjs minecraft/web/app.test.cjs
       - name: Resolve pinned Minecraft body dependencies
         working-directory: minecraft
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: npm install --ignore-scripts --no-audit --no-fund --no-save flying-squid@1.12.0 socket.io-client@4.8.1
       - name: Import Minecraft body and viewer libraries
         working-directory: minecraft
         run: node -e "for (const name of ['mineflayer', 'mineflayer-pathfinder', 'prismarine-viewer/viewer/lib/worldView', 'prismarine-viewer/lib/common']) require(name)"
+
+      - name: Exercise the body and camera against a live 1.21.4 protocol server
+        working-directory: minecraft
+        run: node test/live-survival.cjs
 
   browser-smoke:
     name: Real demo browser smoke

@@ -180,7 +180,7 @@ class AgentBody {
     }
     const inv = ready ? inventory(this.bot) : {}
     return {
-      id: this.config.id, observation_id: observationId, observed_at: snapshot.at,
+      id: this.config.id, observation_id: observationId, observed_at: snapshot.at, body_session: this.session,
       connected: this.connected, alive: this.alive, enabled: this.enabled, lease_expires_at: this.leaseUntil,
       dimension: this.bot.game?.dimension || null, game_mode: this.bot.game?.gameMode || null,
       health: ready ? this.bot.health : 0, food: ready ? this.bot.food : 0,

@@ -128,7 +128,7 @@
     render();
   }
   function renderViewer(agent) {
-    var observation = agent && agent.observation || {}, url = observation.viewer_error ? null : safeViewerUrl(observation.viewer_url), key = agent && url ? [agent.id, url, observation.connected, observation.alive].join("|") : "";
+    var observation = agent && agent.observation || {}, url = observation.viewer_error ? null : safeViewerUrl(observation.viewer_url), key = agent && url ? [agent.id, url, observation.connected, observation.alive, observation.body_session].join("|") : "";
     if (key !== viewerKey) {
       var oldFrame = $("world-viewer"); if (oldFrame) oldFrame.remove();
       viewerKey = key; frameLoaded = false;
