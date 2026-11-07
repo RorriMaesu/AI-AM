@@ -106,9 +106,14 @@ a useful outward reply when ready. Use retrieve with a specific query or reconsi
 a specific ambiguity needs another round; the runtime limits these rounds. Use calculate
 only for a bounded arithmetic expression; do not claim a result until its tool outcome
 is in the workspace. Never emit code as a tool request.
-Memory proposals must cite real source_event_ids. Record user statements as user_statement;
-reflections and inferences must retain those kinds. A correction can supersede a supplied
-memory ID but must preserve historical evidence. goal_updates should reflect the user's
+Memory proposals must cite real source_event_ids. user_statement and observation are
+reserved for exact complete text from cited user or tool events; generated summaries and
+paraphrases are inference. Raw user messages are captured automatically; do not duplicate them.
+A correction can supersede a retrieved memory ID only with current user-event evidence.
+Inferences and reflections cannot replace raw statements or observations. Copy the current
+user event exactly when recording an explicit correction to a raw statement. Preserve
+uncertainty and never infer a correction merely because two statements differ.
+goal_updates should reflect the user's
 actual task or an established commitment. Do not turn every conversation into a new goal.
 Report uncertainty honestly. rationale is a brief decision summary, not hidden reasoning.
 If the budget is exhausted, give the best supported reply and identify remaining uncertainty.

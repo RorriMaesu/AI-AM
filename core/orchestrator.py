@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 if __package__ in (None, ""):
     sys.path.insert(0, str(FilePath(__file__).resolve().parents[1]))
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Path, Query, WebSocket
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Path, Query, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
@@ -198,7 +198,7 @@ async def invoke(operation):
         return await operation()
     except HTTPException:
         raise
-    except asyncio.QueueFull as exc:
+    except (asyncio.QueueFull, OverflowError) as exc:
         raise HTTPException(429, "The input queue is full. Please try again shortly.") from exc
     except KeyError as exc:
         raise HTTPException(404, "The requested record does not exist.") from exc
@@ -226,12 +226,24 @@ def create_app(engine=None, config=None, *, start_runtime=True):
     @asynccontextmanager
     async def lifespan(app):
         task = None
-        if start_runtime:
-            task = asyncio.create_task(engine.run_forever(), name="ai-am-runtime")
-        app.state.runtime_task = task
+        readiness = None
         try:
+            if start_runtime:
+                task = asyncio.create_task(engine.run_forever(), name="ai-am-runtime")
+                app.state.runtime_task = task
+                readiness = asyncio.create_task(engine.ready.wait(), name="ai-am-startup")
+                await asyncio.wait((task, readiness), return_when=asyncio.FIRST_COMPLETED)
+                if task.done():
+                    await task  # Preserve the startup exception, if there is one.
+                    raise RuntimeError("AI-AM runtime exited before it became ready.")
+                if engine.startup_error is not None:
+                    raise engine.startup_error
             yield
         finally:
+            app.state.stopping = True
+            if readiness is not None:
+                readiness.cancel()
+                await asyncio.gather(readiness, return_exceptions=True)
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(engine.stop(), timeout=5)
             if task is not None:
@@ -244,6 +256,12 @@ def create_app(engine=None, config=None, *, start_runtime=True):
     app.state.engine = engine
     app.state.runtime_task = None
     app.state.shutdown_callback = None
+    app.state.stopping = False
+
+    async def require_runtime():
+        task = app.state.runtime_task
+        if app.state.stopping or (start_runtime and (task is None or task.done())):
+            raise HTTPException(503, "The cognitive runtime has stopped. Restart AI-AM before submitting more work.")
 
     @app.get("/api/health")
     async def health():
@@ -271,11 +289,11 @@ def create_app(engine=None, config=None, *, start_runtime=True):
             raise HTTPException(404, "Event not found.")
         return result
 
-    @app.post("/api/input", status_code=202)
+    @app.post("/api/input", status_code=202, dependencies=[Depends(require_runtime)])
     async def submit(data: InputRequest):
         return await invoke(lambda: engine.submit(data.text))
 
-    @app.post("/api/retry", status_code=202)
+    @app.post("/api/retry", status_code=202, dependencies=[Depends(require_runtime)])
     async def retry(data: RetryRequest):
         return await invoke(lambda: engine.retry(data.event_id))
 
@@ -301,7 +319,7 @@ def create_app(engine=None, config=None, *, start_runtime=True):
             return {"models": [], "roles": engine.snapshot().get("roles", {}),
                     "error": "Cannot reach the local model service. Start Ollama and check the configured endpoint."}
 
-    @app.post("/api/model/select")
+    @app.post("/api/model/select", dependencies=[Depends(require_runtime)])
     async def model_select(data: ModelRequest):
         async def change():
             installed = await engine.backend.list_models()
@@ -312,26 +330,27 @@ def create_app(engine=None, config=None, *, start_runtime=True):
             return {"status": "updated", "roles": engine.snapshot().get("roles", {})}
         return await invoke(change)
 
-    @app.post("/api/reflect", status_code=202)
+    @app.post("/api/reflect", status_code=202, dependencies=[Depends(require_runtime)])
     async def reflect(data: ReflectionRequest):
         return await invoke(lambda: engine.reflect(data.topic))
 
-    @app.post("/api/consolidate")
+    @app.post("/api/consolidate", dependencies=[Depends(require_runtime)])
     async def consolidate():
         return await invoke(engine.consolidate)
 
-    @app.post("/api/control")
+    @app.post("/api/control", dependencies=[Depends(require_runtime)])
     async def control(data: ControlRequest):
         await invoke(engine.pause if data.action == "pause" else engine.resume)
         return {"status": engine.snapshot().get("status"), "state": engine.snapshot()}
 
-    @app.post("/api/background")
+    @app.post("/api/background", dependencies=[Depends(require_runtime)])
     async def background(data: BackgroundRequest):
         await invoke(lambda: engine.set_background(data.enabled))
         return {"enabled": data.enabled, "state": engine.snapshot()}
 
     @app.post("/api/stop")
     async def stop(tasks: BackgroundTasks):
+        app.state.stopping = True
         await invoke(engine.stop)
         if app.state.shutdown_callback is not None:
             tasks.add_task(app.state.shutdown_callback)

@@ -56,10 +56,39 @@
   }
   function extractEvidence(event) {
     var meta = (event && event.metadata) || {};
-    var ids = meta.evidence_ids || (meta.decision && meta.decision.evidence_ids) || meta.source_event_ids || [];
+    var trace = Array.isArray(meta.trace) ? meta.trace : [];
+    var finalBuddhi = trace.filter(function (entry) { return entry && entry.role === "buddhi"; }).pop();
+    var ids = meta.evidence_ids || (meta.decision && meta.decision.evidence_ids) ||
+      (finalBuddhi && finalBuddhi.result && finalBuddhi.result.evidence_ids) || meta.source_event_ids || [];
     return Array.isArray(ids) ? Array.from(new Set(ids.filter(function (id) { return typeof id === "string" && id.length > 0; }))) : [];
   }
-  var helpers = { tokenizeCode: tokenizeCode, renderText: renderText, formatDuration: formatDuration, messageKind: messageKind, mergeEvents: mergeEvents, facultyStatus: facultyStatus, modelName: modelName, extractEvidence: extractEvidence };
+  function snapshotFaculties(previous, next, live) {
+    previous = previous || {}; next = next || {};
+    if (next.status === "thinking") {
+      // The engine's workspace is the last committed cycle, not the in-flight cycle.
+      return previous.status === "thinking" && previous.cycle === next.cycle ? Object.assign({}, live) : {};
+    }
+    var workspace = next.workspace || {}, result = {};
+    var restored = {
+      manas: workspace.manas || ((workspace.observations || []).length ? { observations: workspace.observations, interpretations: workspace.interpretations || [] } : null),
+      chitta: workspace.chitta || ((workspace.memories || []).length ? { memories: workspace.memories } : null),
+      ahamkara: workspace.ahamkara || workspace.self_assessment,
+      buddhi: workspace.buddhi || workspace.decision
+    };
+    ROLES.forEach(function (role) {
+      var value = restored[role.id];
+      if (value && typeof value === "object" && Object.keys(value).length) result[role.id] = value;
+    });
+    return result;
+  }
+  function eventError(event) { return text(event && (event.error || (event.metadata || {}).error)); }
+  function validateInput(value, reflection) {
+    var input = String(value || "").trim(), limit = reflection ? 2000 : 8000;
+    if (!reflection && !input) throw new Error("Enter a message first.");
+    if (input.length > limit) throw new Error((reflection ? "Reflection topics" : "Messages") + " are limited to " + limit + " characters.");
+    return input;
+  }
+  var helpers = { tokenizeCode: tokenizeCode, renderText: renderText, formatDuration: formatDuration, messageKind: messageKind, mergeEvents: mergeEvents, facultyStatus: facultyStatus, modelName: modelName, extractEvidence: extractEvidence, snapshotFaculties: snapshotFaculties, eventError: eventError, validateInput: validateInput };
   if (typeof module !== "undefined" && module.exports) module.exports = helpers;
   if (typeof document === "undefined") return;
 
@@ -141,9 +170,9 @@
     container.appendChild(list);
   }
   function renderState(next) {
-    var previousCycle = state.cycle;
+    var previousResults = roleResults;
+    roleResults = snapshotFaculties(state, next, roleResults);
     state = next || {};
-    if (previousCycle !== state.cycle && state.status === "thinking") { roleResults = {}; ROLES.forEach(function (role) { renderResult(role.id, "Waiting for this faculty."); }); }
     var self = state.self_model || {}, meta = state.metrics || {}, workspace = state.workspace || {};
     $("identity-name").textContent = self.name || "AI-AM";
     $("identity-description").textContent = self.description || "Four cooperating faculties, one shared history.";
@@ -174,17 +203,14 @@
     $("attention-text").textContent = typeof current === "object" && current ? (current.content || current.text || "Integrating the current observation.") : (current ? String(current) : "Waiting for an observation.");
     clear($("uncertainty-list"));
     (Array.isArray(workspace.uncertainties) ? workspace.uncertainties : []).slice(0, 4).forEach(function (item) { $("uncertainty-list").appendChild(el("span", "uncertainty-tag", typeof item === "string" ? item : text(item))); });
-    var restored = {
-      manas: workspace.manas || ((workspace.observations || []).length ? { observations: workspace.observations, interpretations: workspace.interpretations || [] } : null),
-      chitta: workspace.chitta || ((workspace.memories || []).length ? { memories: workspace.memories } : null),
-      ahamkara: workspace.ahamkara || workspace.self_assessment,
-      buddhi: workspace.buddhi || workspace.decision
-    };
     ROLES.forEach(function (role) {
-      var value = restored[role.id];
-      if (value && Object.keys(value).length && !roleResults[role.id]) { roleResults[role.id] = value; renderResult(role.id, value); }
+      var value = roleResults[role.id];
+      if (JSON.stringify(value) !== JSON.stringify(previousResults[role.id])) {
+        renderResult(role.id, value || "Waiting for this faculty.");
+      }
     });
     setRoleAppearance();
+    if (Array.isArray(state.recent_events)) renderEvents(state.recent_events);
   }
   function sourceButton(id, label, type) {
     var button = el("button", "evidence-link", label || shortId(id)); button.type = "button";
@@ -212,8 +238,8 @@
           catch (error) { announce(error.message, true); retry.disabled = false; }
         });
         status.appendChild(retry);
-        var error = (event.metadata || {}).error;
-        if (error) status.title = text(error);
+        var error = eventError(event);
+        if (error) status.appendChild(el("span", "message-error", error));
       }
       article.appendChild(status);
     }
@@ -230,13 +256,17 @@
     var conversation = $("conversation"), nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 110;
     var visible = events.filter(function (event) { return messageKind(event.kind) !== "system"; });
     $("welcome").hidden = visible.length > 0;
-    var changed = false;
+    var changed = false, preceding = $("welcome");
     visible.forEach(function (event) {
       var signature = JSON.stringify(event), previous = eventNodes.get(event.id);
-      if (previous && previous.signature === signature) return;
-      var node = createMessage(event);
-      if (previous) previous.node.replaceWith(node); else conversation.appendChild(node);
-      eventNodes.set(event.id, { node: node, signature: signature }); changed = true;
+      var node = previous && previous.signature === signature ? previous.node : createMessage(event);
+      if (!previous || node !== previous.node) {
+        if (previous) previous.node.replaceWith(node);
+        eventNodes.set(event.id, { node: node, signature: signature }); changed = true;
+      }
+      // A reconnect may supply older history after the latest snapshot.
+      if (preceding.nextSibling !== node) { conversation.insertBefore(node, preceding.nextSibling); changed = true; }
+      preceding = node;
     });
     if (changed) {
       if (nearBottom) conversation.scrollTop = conversation.scrollHeight; else $("new-messages").hidden = false;
@@ -368,6 +398,7 @@
       event.preventDefault(); var value = $("message-input").value.trim(); if (!value || isSending || stopped) return;
       isSending = true; $("send-button").disabled = true;
       try {
+        value = validateInput(value, false);
         var queued = await api("/api/input", { text: value }); queued = queued.event || queued;
         if (queued.id) renderEvents([queued]);
         $("message-input").value = ""; resizeComposer(); await refresh();
@@ -395,7 +426,7 @@
     $("reflect-button").addEventListener("click", function () { openDialog($("reflect-dialog")); $("reflect-topic").focus(); });
     $("reflect-form").addEventListener("submit", async function (event) {
       event.preventDefault(); var button = event.submitter; if (button) button.disabled = true;
-      try { await api("/api/reflect", { topic: $("reflect-topic").value.trim() }); $("reflect-dialog").close(); $("reflect-topic").value = ""; await refresh(); announce("Reflection queued."); }
+      try { await api("/api/reflect", { topic: validateInput($("reflect-topic").value, true) }); $("reflect-dialog").close(); $("reflect-topic").value = ""; await refresh(); announce("Reflection queued."); }
       catch (error) { announce(error.message, true); }
       finally { if (button) button.disabled = false; }
     });

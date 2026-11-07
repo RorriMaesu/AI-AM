@@ -5,6 +5,7 @@ import asyncio
 import copy
 import datetime as dt
 import json
+import logging
 import os
 from pathlib import Path
 import time
@@ -14,6 +15,8 @@ from core.config import validate_model_name
 from core.contracts import ROLE_SCHEMAS, ROLES
 from core.inference import DemoBackend, InferenceError, OllamaBackend
 from core.actions import calculate
+
+LOG = logging.getLogger("aiam.engine")
 
 def timestamp():
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -26,12 +29,13 @@ class RuntimeLease:
 
     def acquire(self):
         self.handle = open(self.path, "a+b")
-        self.handle.seek(0)
-        if not self.handle.read(1):
-            self.handle.write(b"0")
-            self.handle.flush()
-        self.handle.seek(0)
         try:
+            # Windows enforces byte locks on reads too. Inspect file size without
+            # reading the byte another process may already own.
+            if os.fstat(self.handle.fileno()).st_size == 0:
+                self.handle.write(b"0")
+                self.handle.flush()
+            self.handle.seek(0)
             if os.name == "nt":
                 import msvcrt
                 msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
@@ -66,6 +70,8 @@ class MindEngine:
         self._wake = asyncio.Event()
         self._lock = asyncio.Lock()
         self._running = False
+        self.ready = asyncio.Event()
+        self.startup_error = None
         self._paused = False
         self._active_task = None
         self._active_event = None
@@ -116,6 +122,7 @@ class MindEngine:
         result["recent_events"] = self.store.list_events(limit=50)
         result["memory_stats"] = self.store.stats()
         result["backend"] = self.config["backend"]
+        result["paused"] = self._paused
         return result
 
     async def _publish(self):
@@ -158,12 +165,18 @@ class MindEngine:
         return event
 
     async def retry(self, event_id):
+        if self.state["status"] == "stopped":
+            raise RuntimeError("Restart the stopped runtime to continue.")
+        if self.store.stats().get("pending", 0) >= self.config["max_pending"]:
+            raise OverflowError("The input queue is full.")
         self.store.retry_event(event_id)
         self._wake.set()
         await self._publish()
         return self.store.get_event(event_id)
 
     async def pause(self):
+        if self.state["status"] == "stopped":
+            raise RuntimeError("Restart the stopped runtime to continue.")
         self._paused = True
         if self._active_task and self._active_event and self._active_event["kind"] == "reflection":
             self._active_task.cancel()
@@ -230,14 +243,18 @@ class MindEngine:
         await self._publish()
 
     async def run_forever(self):
-        self._lease.acquire()
-        self._running = True
+        owns_lease = False
         try:
+            self._lease.acquire()
+            owns_lease = True
             legacy = self.config.get("legacy_db_path")
-            if legacy and Path(legacy).is_file() and Path(legacy).resolve() != Path(self.config["db_path"]).resolve():
+            if (self.config["backend"] != "demo" and legacy and Path(legacy).is_file()
+                    and Path(legacy).resolve() != Path(self.config["db_path"]).resolve()):
                 await asyncio.to_thread(self.store.import_legacy, legacy)
             self.store.recover_pending()
+            self._running = True
             await self._publish()
+            self.ready.set()
             while self._running:
                 if not self._paused:
                     event = self.store.claim_next()
@@ -266,24 +283,35 @@ class MindEngine:
                     await asyncio.wait_for(self._wake.wait(), timeout=1.0)
                 except asyncio.TimeoutError:
                     pass
+        except BaseException as exc:
+            if not self.ready.is_set():
+                self.startup_error = exc
+            raise
         finally:
             self._running = False
-            if self._active_task and not self._active_task.done():
-                self._active_task.cancel()
+            self.ready.set()
+            try:
+                if self._active_task and not self._active_task.done():
+                    self._active_task.cancel()
+                    try:
+                        await self._active_task
+                    except asyncio.CancelledError:
+                        pass
+                self.state.update(status="stopped", active_role=None, current_event=None)
+                if owns_lease:
+                    self.store.save_state(self.state)
+            finally:
                 try:
-                    await self._active_task
-                except asyncio.CancelledError:
-                    pass
-            self.state.update(status="stopped", active_role=None, current_event=None)
-            self.store.save_state(self.state)
-            if hasattr(self.backend, "aclose"):
-                await self.backend.aclose()
-            self._lease.release()
+                    if hasattr(self.backend, "aclose"):
+                        await self.backend.aclose()
+                finally:
+                    self._lease.release()
 
     def _payload(self, event, memories, workspace, round_number):
-        recent = self.store.list_events(limit=12)
+        recent = self.store.list_events(limit=200)
         history = [{"id": e["id"], "kind": e["kind"], "source": e["source"], "content": e["content"][:1000]}
-                   for e in recent if e["id"] != event["id"] and e["kind"] in ("user", "assistant")][-6:]
+                   for e in recent if e["id"] != event["id"] and e["status"] == "complete"
+                   and e["kind"] in ("user", "assistant")][-6:]
         return {
             "current_event": {k: event[k] for k in ("id", "kind", "source", "content")},
             "state_version": self.state["state_version"], "round": round_number,
@@ -317,16 +345,25 @@ class MindEngine:
             self.state.update(status="thinking", current_event=event, active_role=None)
             self.state["cycle"] += 1
             trace = []
-            await self._publish()
             try:
-                await asyncio.wait_for(self._cognitive_cycle(event, trace, started), self.config["cycle_timeout"])
+                await self._publish()
+                reply = await asyncio.wait_for(self._cognitive_cycle(event, trace, started), self.config["cycle_timeout"])
             except asyncio.CancelledError:
+                if self.store.get_event(event["id"])["status"] == "complete":
+                    self.state = self.store.load_state()
+                    raise
                 self.state = before
                 self.state.update(status="paused" if self._paused else "idle", active_role=None, current_event=None)
                 self.store.fail_event(event["id"], "Processing interrupted; this event can be retried.")
                 await self._publish()
                 raise
             except Exception as exc:
+                # A cancellation/error at the completion boundary cannot undo a
+                # successful SQLite commit or make its input retryable.
+                if self.store.get_event(event["id"])["status"] == "complete":
+                    self.state = self.store.load_state()
+                    LOG.exception("Cycle committed but completion notification failed")
+                    return
                 self.state = before
                 self.state["metrics"]["errors"] += 1
                 self.state.update(status="paused" if self._paused else "idle", active_role=None, current_event=None)
@@ -336,6 +373,14 @@ class MindEngine:
                 self.store.save_state(self.state)
                 await self._emit("error", {"event_id": event["id"], "message": message, "retryable": True})
                 await self._publish()
+                return
+            # Notifications are outside the transaction's failure handler.
+            # A disconnected observatory must never roll back a completed mind.
+            try:
+                await self._emit("cycle_completed", {"event": event, "reply": reply, "state": self.snapshot()})
+                await self._publish()
+            except Exception:
+                LOG.exception("Cycle committed; observatory can recover from its next snapshot")
 
     async def _cognitive_cycle(self, event, trace, started):
         workspace = {"observations": [], "interpretations": [], "memories": [], "uncertainties": [],
@@ -431,11 +476,22 @@ class MindEngine:
                 raise ValueError("An observation requires an actual tool outcome.")
             if kind == "user_statement" and any(e["kind"] != "user" for e in source_events):
                 raise ValueError("A user statement requires a user event.")
+            if kind in ("user_statement", "observation"):
+                normalized = " ".join(proposal["content"].split()).casefold()
+                if not any(normalized == " ".join(e["content"].split()).casefold() for e in source_events):
+                    # A source ID proves attribution, not the faithfulness of a
+                    # paraphrase. Preserve generated summaries as inferences.
+                    kind = "inference"
             supersedes = proposal.get("supersedes")
             if supersedes and supersedes not in known_memory_ids:
                 raise ValueError("A correction must identify a memory that was retrieved.")
             if supersedes and event["kind"] != "user":
                 raise ValueError("Background reflection cannot supersede established memories.")
+            if supersedes and event["id"] not in sources:
+                raise ValueError("A correction requires evidence from the current user turn.")
+            if (supersedes and known_memories[supersedes]["kind"] in ("user_statement", "observation")
+                    and kind in ("inference", "reflection")):
+                raise ValueError("An inferred revision cannot replace a recorded statement or observation.")
             # Avoid storing the automatically captured user statement twice.
             if kind == "user_statement" and proposal["content"].strip() == event["content"].strip() and not supersedes:
                 continue
@@ -458,9 +514,7 @@ class MindEngine:
         self.state["metrics"]["latency_ms"] = round((time.monotonic() - started) * 1000)
         self.state.update(status="paused" if self._paused else "idle", current_event=None, active_role=None)
         self.state["last_trace"] = trace
-        reply = self.store.commit_cycle(event["id"], self.state, final["reply"], updates, trace)
-        await self._emit("cycle_completed", {"event": event, "reply": reply, "state": self.snapshot()})
-        await self._publish()
+        return self.store.commit_cycle(event["id"], self.state, final["reply"], updates, trace)
 
     @staticmethod
     def _bounded_reply(decision, reason):

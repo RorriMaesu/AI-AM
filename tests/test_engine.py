@@ -94,7 +94,7 @@ def test_correction_supersedes_evidence(parts):
     prior = store.add_memory("My notebook is blue.", "user_statement", "user", [old["id"]], 1.0)
     def corrected(payload):
         return decision(reply="I recorded the correction.", evidence_ids=[prior["id"], payload["current_event"]["id"]],
-                        memory_updates=[{"content": "The user's notebook is green.", "kind": "user_statement",
+                        memory_updates=[{"content": payload["current_event"]["content"], "kind": "user_statement",
                         "source_event_ids": [payload["current_event"]["id"]], "confidence": 1.0, "supersedes": prior["id"]}])
     run_event(config, store, ScriptBackend([corrected]), "Correction: my notebook is green, not blue.")
     assert MindEngine(config, store, ScriptBackend()).state["state_version"] == 1
@@ -265,3 +265,164 @@ def test_calculator(expression, expected):
 def test_calculator_rejects_execution(expression):
     with pytest.raises(ValueError):
         calculate(expression)
+
+def test_future_and_failed_inputs_are_not_conversation_history(parts):
+    config, store = parts
+    async def work():
+        backend = ScriptBackend()
+        engine = MindEngine(config, store, backend)
+        past = store.append_event("user", "An earlier completed statement.", source="user")
+        first = await engine.submit("Process this first.")
+        future = await engine.submit("Secret from a future queued turn.")
+        failed = store.append_event("user", "A failed attempt.", source="user", status="pending")
+        store.fail_event(failed["id"], "previous failure")
+        await engine.process_event(store.claim_next())
+        for _, payload in backend.calls:
+            ids = {e["id"] for e in payload["history"]}
+            assert past["id"] in ids
+            assert future["id"] not in ids
+            assert failed["id"] not in ids
+            assert payload["current_event"]["id"] == first["id"]
+    asyncio.run(work())
+
+def test_notification_failure_does_not_undo_commit(parts, monkeypatch):
+    config, store = parts
+    async def work():
+        engine = MindEngine(config, store, ScriptBackend())
+        event = await engine.submit("Preserve this completed turn.")
+        original = engine._emit
+        async def unavailable(kind, data):
+            if kind == "cycle_completed":
+                raise OSError("Observatory disconnected")
+            await original(kind, data)
+        monkeypatch.setattr(engine, "_emit", unavailable)
+        await engine.process_event(store.claim_next())
+        assert store.get_event(event["id"])["status"] == "complete"
+        assert engine.state["state_version"] == store.load_state()["state_version"] == 1
+        assert len([e for e in store.list_events() if e["kind"] == "assistant"]) == 1
+        assert engine.state["metrics"]["errors"] == 0
+    asyncio.run(work())
+
+def test_worker_startup_error_signals_readiness_without_writing_state(parts, monkeypatch):
+    config, store = parts
+    async def work():
+        engine = MindEngine(config, store, ScriptBackend())
+        def occupied():
+            raise RuntimeError("already owned")
+        monkeypatch.setattr(engine._lease, "acquire", occupied)
+        with pytest.raises(RuntimeError, match="already owned"):
+            await engine.run_forever()
+        assert engine.ready.is_set()
+        assert isinstance(engine.startup_error, RuntimeError)
+        assert engine.state["status"] == "stopped"
+        assert store.load_state() is None
+    asyncio.run(work())
+
+@pytest.mark.parametrize("failure", ["save", "close"])
+def test_cleanup_always_releases_runtime_lease(parts, monkeypatch, failure):
+    config, store = parts
+    async def work():
+        backend = ScriptBackend()
+        engine = MindEngine(config, store, backend)
+        task = asyncio.create_task(engine.run_forever())
+        await asyncio.wait_for(engine.ready.wait(), 2)
+        assert engine.startup_error is None
+        if failure == "save":
+            def fail_save(state):
+                raise OSError("cannot save")
+            monkeypatch.setattr(store, "save_state", fail_save)
+        else:
+            async def fail_close():
+                raise OSError("cannot close")
+            monkeypatch.setattr(backend, "aclose", fail_close)
+        await engine.stop()
+        with pytest.raises(OSError):
+            await task
+        assert engine._lease.handle is None
+        another = RuntimeLease(config["db_path"])
+        another.acquire()
+        another.release()
+    asyncio.run(work())
+
+def test_stopped_worker_cannot_be_reopened_by_pause(parts):
+    config, store = parts
+    async def work():
+        engine = MindEngine(config, store, ScriptBackend())
+        failed = await engine.submit("Failed input")
+        store.fail_event(failed["id"], "offline")
+        await engine.stop()
+        for operation in (engine.pause, engine.resume,
+                          lambda: engine.submit("new"), lambda: engine.reflect("topic"),
+                          lambda: engine.retry(failed["id"])):
+            with pytest.raises(RuntimeError):
+                await operation()
+        assert engine.state["status"] == "stopped"
+        assert store.stats()["pending"] == 0
+    asyncio.run(work())
+
+def test_retry_respects_queue_capacity(parts):
+    config, store = parts
+    config["max_pending"] = 1
+    async def work():
+        engine = MindEngine(config, store, ScriptBackend())
+        failed = await engine.submit("Failed input")
+        store.fail_event(failed["id"], "offline")
+        await engine.submit("Waiting")
+        with pytest.raises(OverflowError):
+            await engine.retry(failed["id"])
+        assert store.get_event(failed["id"])["status"] == "failed"
+    asyncio.run(work())
+
+def test_generated_paraphrase_is_not_a_raw_statement(parts):
+    config, store = parts
+    def paraphrase(payload):
+        return decision(memory_updates=[{"content": "The notebook is definitely red.",
+                        "kind": "user_statement", "source_event_ids": [payload["current_event"]["id"]],
+                        "confidence": .9}])
+    _, event = run_event(config, store, ScriptBackend([paraphrase]), "The notebook might be red.")
+    records = store.retrieve("notebook")
+    assert any(m["content"] == "The notebook might be red." and m["kind"] == "user_statement" for m in records)
+    assert any(m["content"] == "The notebook is definitely red." and m["kind"] == "inference" for m in records)
+    assert store.get_event(event["id"])["status"] == "complete"
+
+@pytest.mark.parametrize("old_sources", [True, False])
+def test_correction_cannot_replace_raw_evidence_with_an_inference(parts, old_sources):
+    config, store = parts
+    old = store.append_event("user", "My notebook is blue.", source="user")
+    memory = store.add_memory(old["content"], "user_statement", "user", [old["id"]], 1.0)
+    def unsupported(payload):
+        return decision(memory_updates=[{"content": old["content"] if old_sources else "The notebook must be green.",
+                        "kind": "user_statement" if old_sources else "inference",
+                        "source_event_ids": [old["id"] if old_sources else payload["current_event"]["id"]],
+                        "confidence": .9, "supersedes": memory["id"]}])
+    _, event = run_event(config, store, ScriptBackend([unsupported]), "Where is my notebook?")
+    assert store.get_event(event["id"])["status"] == "failed"
+    assert memory["id"] in [m["id"] for m in store.retrieve("notebook")]
+    assert not [e for e in store.list_events() if e["kind"] == "assistant"]
+
+def test_demo_never_imports_live_legacy_history(parts, monkeypatch, tmp_path):
+    config, store = parts
+    legacy = tmp_path / "legacy.db"
+    legacy.write_text("not opened")
+    config["legacy_db_path"] = str(legacy)
+    def forbidden(path):
+        raise AssertionError("Demo must not import live history")
+    monkeypatch.setattr(store, "import_legacy", forbidden)
+    async def work():
+        engine = MindEngine(config, store, ScriptBackend())
+        task = asyncio.create_task(engine.run_forever())
+        await asyncio.wait_for(engine.ready.wait(), 2)
+        assert engine.startup_error is None
+        await engine.stop()
+        await task
+    asyncio.run(work())
+
+def test_paused_snapshot_during_foreground_processing(parts):
+    config, store = parts
+    async def work():
+        engine = MindEngine(config, store, ScriptBackend())
+        engine.state["status"] = "thinking"
+        await engine.pause()
+        assert engine.snapshot()["paused"] is True
+        assert engine.snapshot()["status"] == "thinking"
+    asyncio.run(work())

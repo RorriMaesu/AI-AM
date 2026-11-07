@@ -53,12 +53,15 @@ class FakeEngine:
         self.started = False
         self.stop_called = False
         self.stopped = asyncio.Event()
+        self.ready = asyncio.Event()
+        self.startup_error = None
 
     def snapshot(self):
         return deepcopy(self.state)
 
     async def run_forever(self):
         self.started = True
+        self.ready.set()
         await self.stopped.wait()
 
     async def stop(self):
@@ -246,9 +249,10 @@ def test_retry_preserves_existing_event(client, engine):
     assert len(engine.store.events) == 1
 
 
-def test_queue_backpressure_is_reported(client, engine):
+@pytest.mark.parametrize("error_type", [asyncio.QueueFull, OverflowError])
+def test_queue_backpressure_is_reported(client, engine, error_type):
     async def full(text):
-        raise asyncio.QueueFull()
+        raise error_type()
     engine.submit = full
     assert client.post("/api/input", json={"text": "hello"}).status_code == 429
 
@@ -309,3 +313,84 @@ def test_security_headers_and_static_page(client):
     assert page.status_code == 200
     assert "script-src 'self'" in page.headers["Content-Security-Policy"]
     assert client.get("/ui/app.js").status_code == 200
+
+
+def test_startup_waits_for_engine_readiness():
+    class PreparingEngine(FakeEngine):
+        async def run_forever(self):
+            await asyncio.sleep(0.02)
+            self.started = True
+            self.ready.set()
+            await self.stopped.wait()
+    engine = PreparingEngine()
+    with TestClient(create_app(engine=engine), base_url=ORIGIN) as client:
+        assert engine.started
+        assert engine.ready.is_set()
+        assert client.get("/api/health").json()["runtime_running"] is True
+
+
+@pytest.mark.parametrize("announce_failure", [False, True])
+def test_startup_failure_prevents_serving_requests(announce_failure):
+    class FailedEngine(FakeEngine):
+        async def run_forever(self):
+            error = RuntimeError("Another runtime owns this memory.")
+            if announce_failure:
+                self.startup_error = error
+                self.ready.set()
+            raise error
+    engine = FailedEngine()
+    with pytest.raises(RuntimeError, match="owns this memory"):
+        with TestClient(create_app(engine=engine), base_url=ORIGIN):
+            pytest.fail("A failed runtime must not start serving requests.")
+    assert engine.stop_called
+
+
+def test_worker_exit_before_readiness_prevents_startup():
+    class ExitedEngine(FakeEngine):
+        async def run_forever(self):
+            return
+    with pytest.raises(RuntimeError, match="before it became ready"):
+        with TestClient(create_app(engine=ExitedEngine()), base_url=ORIGIN):
+            pytest.fail("An exited runtime must not start serving requests.")
+
+
+@pytest.mark.parametrize("path,payload", [
+    ("/api/input", {"text": "Do not lose this request."}),
+    ("/api/retry", {"event_id": "e1"}),
+    ("/api/reflect", {"topic": "A new reflection"}),
+    ("/api/consolidate", {}),
+    ("/api/control", {"action": "pause"}),
+    ("/api/background", {"enabled": True}),
+    ("/api/model/select", {"role": "manas", "model": "local:small"}),
+])
+def test_dead_worker_rejects_mutations_but_preserves_read_access(path, payload):
+    class FailingEngine(FakeEngine):
+        def __init__(self):
+            super().__init__()
+            self.crash = asyncio.Event()
+        async def run_forever(self):
+            self.started = True
+            self.ready.set()
+            await self.crash.wait()
+            self.state["status"] = "stopped"
+            raise RuntimeError("The worker encountered an error.")
+    engine = FailingEngine()
+    app = create_app(engine=engine)
+    with TestClient(app, base_url=ORIGIN) as client:
+        async def finish_worker():
+            engine.crash.set()
+            await asyncio.gather(app.state.runtime_task, return_exceptions=True)
+        client.portal.call(finish_worker)
+        assert client.post(path, json=payload).status_code == 503
+        assert client.get("/api/events/e1").status_code == 200
+        assert client.get("/api/health").json()["runtime_running"] is False
+        assert client.post("/api/stop", json={}).status_code == 200
+    assert len(engine.store.events) == 1
+
+
+def test_stop_immediately_blocks_new_work_even_without_worker(client, engine):
+    assert client.post("/api/stop", json={}).status_code == 200
+    assert client.post("/api/control", json={"action": "pause"}).status_code == 503
+    assert client.post("/api/input", json={"text": "Too late."}).status_code == 503
+    assert engine.state["status"] == "stopped"
+    assert len(engine.store.events) == 1
