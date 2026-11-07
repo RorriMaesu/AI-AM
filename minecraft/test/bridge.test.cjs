@@ -43,7 +43,7 @@ function fixture (options = {}) {
   const deps = { Vec3, goals: { GoalNear: class { constructor (x, y, z, radius) { Object.assign(this, { x, y, z, radius }) } } }, Movements: class {}, pathfinder: () => {} }
   let clock = 100000
   const body = new AgentBody(bot, deps, { id: 'ai-am', username: 'AI_AM', viewer_port: 8767 }, { reflexTimer: false, clock: () => clock, session: 'test', ...options })
-  bot.emit('spawn')
+  if (options.initialSpawn !== false) bot.emit('spawn')
   const request = (skill, target = '', id = 'a1') => ({ action_id: id, skill, target, observation_id: body.observe().observation_id, timeout_ms: 1000 })
   const settle = async () => { const active = body.active; if (active) await active.promise }
   return { bot, body, items, put, request, settle, deps, advance: n => { clock += n } }
@@ -337,3 +337,104 @@ test('hay blocks and actually available wheat recipes support food crafting', ()
   assert(observation.visible.some(b => b.name === 'hay_block'))
   assert(observation.recipes.includes('wheat'))
 })
+
+test('saved-dead login reports connected death before the first spawn without automatic respawn', () => {
+  const { bot, body } = fixture({ initialSpawn: false, healthPending: true })
+  let respawns = 0
+  bot.respawn = () => { respawns++ }
+  try {
+    assert.equal(body.connected, false)
+    bot.health = 0
+    bot.emit('death')
+    const observed = body.observe()
+    assert.equal(observed.connected, true, 'A death packet confirms an established game connection even without spawn')
+    assert.equal(observed.alive, false)
+    assert.equal(observed.health, 0)
+    assert.equal(observed.enabled, false)
+    assert(observed.death)
+    assert.equal(respawns, 0, 'A saved-dead login must wait for an explicit Start before respawning')
+  } finally { body.close() }
+})
+
+async function waitForRespawn (called, timeoutMs = 1500) {
+  const deadline = Date.now() + timeoutMs
+  while (!called() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10))
+  assert(called(), 'Explicit Start did not request respawn after saved-dead reconnect')
+}
+
+function reconnectFixture () {
+  const { deps } = fixture()
+  const bots = []; const createdOptions = []
+  deps.createBot = options => {
+    const { bot } = fixture({ initialSpawn: false, healthPending: true })
+    bot.respawnCalls = 0
+    bot.respawn = () => { bot.respawnCalls++ }
+    bots.push(bot); createdOptions.push(options)
+    return bot
+  }
+  return { manager: new BodyManager(config(), deps), bots, createdOptions }
+}
+
+test('explicit Start respawns a saved-dead reconnect exactly once and waits for spawn plus health', async () => {
+  const { manager, bots, createdOptions } = reconnectFixture()
+  let pending
+  try {
+    pending = manager.start('ai-am')
+    assert.equal(manager.start('ai-am'), pending, 'Concurrent Start requests must share the pending recovery')
+    assert.equal(bots.length, 2, 'A disconnected initial body must be replaced on explicit Start')
+    const bot = bots.at(-1)
+    assert(createdOptions.every(options => options.respawn === false))
+    bot.health = 0
+    bot.emit('death') // Login from saved-dead server state: no spawn is sent first.
+    await waitForRespawn(() => bot.respawnCalls > 0)
+    assert.equal(manager.get('ai-am').enabled, false)
+    // Keep the client dead across more than one manager poll to catch repeated respawn requests.
+    await new Promise(resolve => setTimeout(resolve, 225))
+    assert.equal(bot.respawnCalls, 1)
+    bot.emit('spawn') // Mineflayer may emit spawn before assigning the packet's new health.
+    assert.equal(manager.get('ai-am').alive, false)
+    assert.equal(manager.get('ai-am').enabled, false)
+    bot.health = 20
+    bot.emit('health')
+    const result = await pending
+    assert.equal(result.enabled, true)
+    assert.equal(manager.get('ai-am').observe().alive, true)
+    assert.equal(bot.respawnCalls, 1)
+  } finally {
+    manager.stop('ai-am')
+    if (pending) await pending.catch(() => {})
+    manager.close()
+  }
+})
+
+for (const phase of ['before death arrives', 'after respawn is requested']) {
+  test('Stop during saved-dead reconnect ' + phase + ' prevents late enabling', async () => {
+    const { manager, bots, createdOptions } = reconnectFixture()
+    let pending
+    try {
+      pending = manager.start('ai-am')
+      const rejection = assert.rejects(pending, /cancelled/)
+      const bot = bots.at(-1)
+      if (phase === 'before death arrives') manager.stop('ai-am')
+      bot.health = 0
+      bot.emit('death')
+      if (phase === 'after respawn is requested') {
+        await waitForRespawn(() => bot.respawnCalls > 0)
+        manager.stop('ai-am')
+      }
+      // Late server packets must not undo the operator's Stop.
+      bot.emit('spawn')
+      bot.health = 20
+      bot.emit('health')
+      await rejection
+      assert.equal(manager.get('ai-am').enabled, false)
+      assert.equal(manager.get('ai-am').leaseUntil, 0)
+      assert.equal(bot.respawnCalls, phase === 'before death arrives' ? 0 : 1)
+      assert(createdOptions.every(options => options.respawn === false))
+    } finally {
+      manager.stop('ai-am')
+      if (pending) await pending.catch(() => {})
+      manager.close()
+    }
+  })
+}

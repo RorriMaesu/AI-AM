@@ -88,6 +88,8 @@ class AgentBody {
     // Mineflayer emits the initial spawn before assigning health from the same packet.
     bot.on('health', () => { if (this.connected) this.alive = bot.health > 0 })
     bot.on('death', () => {
+      // A player that logs in with zero health can die before the first spawn event.
+      this.connected = true
       this.alive = false; this.death = { id: 'death:' + this.session + ':' + ++this.sequence, at: this.clock() }
       this.stop('death')
     })
@@ -552,9 +554,18 @@ class BodyManager {
   async startBody (id, pending) {
     let body = this.get(id)
     if (!body.connected || body.active?.controller.signal.aborted) body = this.connect(body.config)
-    else if (!body.alive) body.bot.respawn()
     const deadline = Date.now() + 15000
-    while ((!body.connected || !body.alive) && Date.now() < deadline && !pending.cancelled) await new Promise(resolve => setTimeout(resolve, 100))
+    let respawnRequested = false
+    while ((!body.connected || !body.alive) && Date.now() < deadline && !pending.cancelled) {
+      // The death signal can arrive after connect() returns. Request once, only
+      // after Mineflayer has processed the death and before enabling controls.
+      if (body.connected && body.death && !respawnRequested) {
+        respawnRequested = true
+        body.bot.respawn()
+      }
+      if (body.connected && body.alive) break
+      await delay(100)
+    }
     assert(!pending.cancelled, 'Start cancelled by operator', 409)
     assert(body.connected && body.alive, 'Minecraft connection or respawn did not complete', 503)
     return body.start()
