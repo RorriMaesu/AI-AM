@@ -290,3 +290,22 @@ test('flee uses observed entity and confirms increasing distance', async () => {
   assert.equal(body.getAction('a1').status, 'succeeded', body.getAction('a1').reason)
   assert(bot.entity.position.z > 0)
 })
+
+test('visible crops expose growth stage without revealing crops behind walls', () => {
+  const { body, bot, put } = fixture()
+  const crop = put(1, 64, -3, 'wheat'); crop.boundingBox = 'empty'; crop.getProperties = () => ({ age: 7 })
+  put(-1, 65, -2, 'stone'); const hidden = put(-1, 64, -4, 'carrots'); hidden.boundingBox = 'empty'
+  bot.canSeeBlock = b => b.boundingBox === 'block'
+  const seen = body.observe().visible
+  assert(seen.some(b => b.name === 'wheat' && b.age === 7))
+  assert(!seen.some(b => b.name === 'carrots'))
+})
+test('hay blocks and actually available wheat recipes support food crafting', () => {
+  const { body, bot, put } = fixture()
+  put(0, 65, -3, 'hay_block')
+  bot.registry.itemsByName.wheat = { id: 30 }
+  bot.recipesFor = id => id === 30 ? [{}] : []
+  const observation = body.observe()
+  assert(observation.visible.some(b => b.name === 'hay_block'))
+  assert(observation.recipes.includes('wheat'))
+})

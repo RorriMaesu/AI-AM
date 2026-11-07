@@ -8,7 +8,8 @@ const path = require('node:path')
 
 const SKILLS = Object.freeze(['look', 'navigate', 'collect', 'craft', 'eat', 'equip', 'place', 'chat', 'wait', 'flee', 'give'])
 const HOSTILES = new Set(['zombie', 'husk', 'drowned', 'skeleton', 'stray', 'creeper', 'spider', 'cave_spider', 'witch', 'pillager', 'vindicator', 'phantom', 'slime', 'magma_cube'])
-const FOODS = new Set(['apple', 'bread', 'baked_potato', 'carrot', 'golden_carrot', 'cooked_beef', 'cooked_porkchop', 'cooked_chicken', 'cooked_mutton', 'cooked_rabbit', 'cooked_cod', 'cooked_salmon', 'melon_slice', 'sweet_berries', 'glow_berries'])
+const FOODS = new Set(['apple', 'bread', 'baked_potato', 'carrot', 'golden_carrot', 'cooked_beef', 'cooked_porkchop', 'cooked_chicken', 'cooked_mutton', 'cooked_rabbit', 'cooked_cod', 'cooked_salmon', 'melon_slice', 'sweet_berries', 'glow_berries', 'potato', 'beetroot'])
+const CROPS = new Set(['wheat', 'carrots', 'potatoes', 'beetroots', 'sweet_berry_bush'])
 const LIVE = new Set(['running'])
 const clone = value => JSON.parse(JSON.stringify(value))
 const pos = p => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100, z: Math.round(p.z * 100) / 100 })
@@ -131,17 +132,17 @@ class AgentBody {
   }
   visibleBlocks () {
     const bot = this.bot
-    const interesting = b => b && b.boundingBox !== 'empty' && /log|wood|stone|coal|iron|crafting_table|furnace|dirt|grass_block|sand|planks|leaves|bed|chest/.test(b.name)
+    const interesting = b => b && ((b.boundingBox !== 'empty' && /log|wood|stone|coal|iron|crafting_table|furnace|dirt|grass_block|sand|planks|leaves|bed|chest|hay_block/.test(b.name)) || CROPS.has(b.name))
     const all = bot.findBlocks({ matching: interesting, maxDistance: 12, count: 128 })
     const result = []
     for (const p of all) {
       const b = bot.blockAt(p)
       if (!b) continue
       const id = blockId(p); const center = { x: p.x + 0.5, y: p.y + 0.5, z: p.z + 0.5 }
-      if (this.visiblePoint(center, id) && bot.canSeeBlock(b)) result.push({ id, name: b.name, position: pos(p), distance: Math.round(distance(bot.entity.position, p) * 10) / 10 })
+      if (this.visiblePoint(center, id) && (CROPS.has(b.name) || bot.canSeeBlock(b))) result.push({ id, name: b.name, ...(CROPS.has(b.name) ? { age: b.getProperties?.().age ?? null } : {}), position: pos(p), distance: Math.round(distance(bot.entity.position, p) * 10) / 10 })
     }
     result.sort((a, b) => {
-      const priority = n => /log|crafting_table|furnace|bed|chest/.test(n) ? 0 : /stone|coal|iron|planks/.test(n) ? 1 : 2
+      const priority = n => /log|crafting_table|furnace|bed|chest|hay_block/.test(n) || CROPS.has(n) ? 0 : /stone|coal|iron|planks/.test(n) ? 1 : 2
       return priority(a.name) - priority(b.name) || a.distance - b.distance || a.id.localeCompare(b.id)
     })
     return result.slice(0, 18)
@@ -159,7 +160,7 @@ class AgentBody {
   }
   recipes (visible) {
     const table = this.craftingTable(visible)
-    const names = ['oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks', 'mangrove_planks', 'cherry_planks', 'bamboo_planks', 'stick', 'crafting_table', 'wooden_pickaxe', 'wooden_axe', 'stone_pickaxe', 'stone_axe', 'furnace', 'torch', 'bread', 'bowl', 'white_bed']
+    const names = ['oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks', 'mangrove_planks', 'cherry_planks', 'bamboo_planks', 'stick', 'crafting_table', 'wooden_pickaxe', 'wooden_axe', 'stone_pickaxe', 'stone_axe', 'furnace', 'torch', 'wheat', 'bread', 'bowl', 'white_bed']
     return names.filter(name => {
       const item = this.bot.registry.itemsByName[name]
       return item && this.bot.recipesFor(item.id, null, 1, table).length > 0
@@ -241,7 +242,7 @@ class AgentBody {
     const known = observation.visible.find(b => b.id === target)
     assert(known, 'Target was not in the supplied observation')
     const block = this.bot.blockAt(this.vector(known.position))
-    assert(block && block.name === known.name && this.visiblePoint({ x: known.position.x + 0.5, y: known.position.y + 0.5, z: known.position.z + 0.5 }, known.id) && this.bot.canSeeBlock(block), 'Target is no longer visible or has changed', 409)
+    assert(block && block.name === known.name && this.visiblePoint({ x: known.position.x + 0.5, y: known.position.y + 0.5, z: known.position.z + 0.5 }, known.id) && (CROPS.has(block.name) || this.bot.canSeeBlock(block)), 'Target is no longer visible or has changed', 409)
     return block
   }
   assertEntity (target, observation) {
@@ -608,7 +609,7 @@ function createViewer (manager, agentId, port) {
   // WorldView transport on our own loopback server instead; no blockClicked handler.
   const express = require('express')
   const { Server } = require('socket.io')
-  const { WorldView } = require('prismarine-viewer/viewer')
+  const { WorldView } = require('prismarine-viewer/viewer/lib/worldView')
   const { setupRoutes } = require('prismarine-viewer/lib/common')
   const app = express()
   app.use((req, res, next) => {

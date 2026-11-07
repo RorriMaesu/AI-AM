@@ -52,7 +52,7 @@ jobs:
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Import Minecraft body and viewer libraries
         working-directory: minecraft
-        run: node -e "for (const name of ['mineflayer', 'mineflayer-pathfinder', 'prismarine-viewer/viewer', 'prismarine-viewer/lib/common']) require(name)"
+        run: node -e "for (const name of ['mineflayer', 'mineflayer-pathfinder', 'prismarine-viewer/viewer/lib/worldView', 'prismarine-viewer/lib/common']) require(name)"
 
   browser-smoke:
     name: Real demo browser smoke
