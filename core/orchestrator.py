@@ -5,6 +5,7 @@ Importing this module does not create state, load a model, or start a server.
 from __future__ import annotations
 
 import argparse
+import anyio
 import asyncio
 import contextlib
 import logging
@@ -20,6 +21,7 @@ if __package__ in (None, ""):
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Path, Query, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
 
 LOG = logging.getLogger("aiam.service")
@@ -363,28 +365,38 @@ def create_app(engine=None, config=None, *, start_runtime=True):
         try:
             await websocket.send_json({"type": "state", "data": engine.snapshot()})
 
-            async def sender():
-                while True:
-                    await websocket.send_json(await queue.get())
+            async def sender(group):
+                try:
+                    while True:
+                        await websocket.send_json(await queue.get())
+                except WebSocketDisconnect:
+                    pass
+                finally:
+                    group.cancel_scope.cancel()
 
-            async def receiver():
-                while True:
-                    message = await websocket.receive()
-                    if message["type"] == "websocket.disconnect":
-                        return
-                    if message["type"] == "websocket.receive":
-                        # The WebSocket is an observation channel. Mutations use validated HTTP.
-                        await websocket.close(code=1008, reason="Use the HTTP input endpoint.")
-                        return
+            async def receiver(group):
+                try:
+                    while True:
+                        message = await websocket.receive()
+                        if message["type"] == "websocket.disconnect":
+                            return
+                        if message["type"] == "websocket.receive":
+                            # Mutations use validated HTTP, not the observation channel.
+                            await websocket.close(code=1008, reason="Use the HTTP input endpoint.")
+                            return
+                except WebSocketDisconnect:
+                    pass
+                finally:
+                    group.cancel_scope.cancel()
 
-            send_task = asyncio.create_task(sender())
-            receive_task = asyncio.create_task(receiver())
-            try:
-                await asyncio.wait((send_task, receive_task), return_when=asyncio.FIRST_COMPLETED)
-            finally:
-                send_task.cancel()
-                receive_task.cancel()
-                await asyncio.gather(send_task, receive_task, return_exceptions=True)
+            # Structured task ownership works with both Uvicorn's asyncio loop
+            # and Starlette's level cancellation. Either side closing cancels
+            # and drains its sibling before releasing the subscription.
+            async with anyio.create_task_group() as group:
+                group.start_soon(sender, group)
+                group.start_soon(receiver, group)
+        except WebSocketDisconnect:
+            pass
         finally:
             engine.unsubscribe(queue)
 

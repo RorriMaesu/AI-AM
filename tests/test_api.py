@@ -394,3 +394,15 @@ def test_stop_immediately_blocks_new_work_even_without_worker(client, engine):
     assert client.post("/api/input", json={"text": "Too late."}).status_code == 503
     assert engine.state["status"] == "stopped"
     assert len(engine.store.events) == 1
+
+def test_websocket_repeated_disconnect_releases_all_subscriptions(client, engine):
+    for _ in range(25):
+        with client.websocket_connect(WS_ORIGIN + "/ws", headers={"Origin": ORIGIN}) as websocket:
+            assert websocket.receive_json()["type"] == "state"
+        assert not engine.subscribers
+
+def test_websocket_immediate_disconnect_releases_subscription(client, engine):
+    for _ in range(10):
+        with client.websocket_connect(WS_ORIGIN + "/ws", headers={"Origin": ORIGIN}):
+            pass
+        assert not engine.subscribers
