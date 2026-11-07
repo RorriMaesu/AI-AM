@@ -71,7 +71,8 @@ class BuddhiResult(Contract):
     reply: Annotated[str, StringConstraints(strict=True, max_length=6000)] = ""
     query: Text = Field(default="", description="Required nonempty search or reconsideration question for retrieve/reconsider.")
     expression: Annotated[str, StringConstraints(strict=True, max_length=200)] = Field(default="", description="Required for calculate: put the arithmetic expression here, for example 17*23, not in query.")
-    environment_action: Literal["", "look", "turn_left", "turn_right", "move_forward", "inspect", "pick_up", "drop", "wait"] = ""
+    environment_action: Literal["", "look", "turn_left", "turn_right", "move_forward", "inspect", "pick_up", "drop", "wait",
+                                "navigate", "collect", "craft", "eat", "equip", "place", "chat", "flee", "give"] = ""
     target: Annotated[str, StringConstraints(strict=True, max_length=128)] = ""
     prediction: Text = ""
     prediction_confidence: UnitFloat = 0.5
@@ -93,10 +94,12 @@ class BuddhiResult(Contract):
         if self.action == "environment":
             if not self.environment_action or not self.prediction.strip():
                 raise ValueError("action=environment requires environment_action and a nonempty prediction before acting")
-            if self.environment_action in ("inspect", "pick_up", "drop") and not self.target.strip():
-                raise ValueError("inspect, pick_up and drop require a target object ID from the supplied observation")
-            if self.environment_action not in ("inspect", "pick_up", "drop") and self.target:
-                raise ValueError("Only inspect, pick_up and drop accept a target")
+            required_target = {"inspect", "pick_up", "drop", "navigate", "collect", "craft", "equip", "place", "chat", "give"}
+            no_target = {"look", "turn_left", "turn_right", "move_forward", "wait"}
+            if self.environment_action in required_target and not self.target.strip():
+                raise ValueError(f"{self.environment_action} requires a target")
+            if self.environment_action in no_target and self.target:
+                raise ValueError(f"{self.environment_action} does not accept a target")
         elif self.environment_action or self.target or self.prediction:
             raise ValueError("Only action=environment may include environment_action, target or prediction")
         return self
