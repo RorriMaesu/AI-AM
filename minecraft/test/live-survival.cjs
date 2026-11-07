@@ -141,10 +141,17 @@ async function main () {
       const r = await request(id, 'actions/' + action.action_id)
       return r.status !== 'running' ? r : null
     }, timeoutMs + 5000, skill + ' terminal receipt')
-    await poll(() => !manager.get(id).active, 3000, skill + ' releases body lock')
     const after = snapshot(manager.get(id).bot.entity.position)
     const entry = { agent: id, action, before, after, receipt }
     report.skill_receipts.push(entry)
+    if (receipt.status === 'outcome_unknown') {
+      // An uncancellable game call can remain quarantined after its receipt
+      // becomes terminal. Keep the receipt and avoid issuing another skill.
+      entry.quarantined = manager.get(id).active?.id === action.action_id
+      assert.equal(receipt.may_have_effects, true)
+    } else {
+      await poll(() => !manager.get(id).active, 3000, skill + ' releases body lock')
+    }
     return entry
   }
 

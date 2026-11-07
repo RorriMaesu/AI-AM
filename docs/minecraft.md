@@ -88,3 +88,11 @@ Ctrl+C stops only the bridge and supervisor started by that launcher. It does no
 Application logs are under `DataDir\logs`; generated configuration is under `DataDir\runtime`. Caches and temporary files are redirected to `DataDir\cache` and `DataDir\temp`. The random bridge token is inherited through the process environment and is not written into the configuration or printed.
 
 A mind checkpoint backs up a character's mind database. It is **not a Minecraft world snapshot**. Save and back up the world separately through the server. Neither a checkpoint nor a convincing sentence from a character establishes a conscious experience.
+
+## Verify your first run
+
+Start with one character and give it the goal “Collect one visible log, craft planks, and stop.” Watch the inventory and action results. Collection should remove the observed log and add one to inventory. Crafting should consume the log and add four planks. A timeout leaves an unknown outcome and stops the run. Check the current inventory before starting a new goal.
+
+Once gathering and crafting work on your server, start a fresh Survival world during daylight and watch the character try to stay fed and sheltered until dawn. Record the game time, deaths, and any operator help so you can compare runs.
+
+The hosted live test exercises the production bridge and camera through Minecraft 1.21.4 packets using the open-source Flying Squid server. Its flat fixture tests joining, looking, movement, collection, camera updates, and cancellation. Crafting receipts are reported separately because the compatibility server's inventory behavior can differ from vanilla.

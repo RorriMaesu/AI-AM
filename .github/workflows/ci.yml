@@ -56,6 +56,8 @@ jobs:
 
       - name: Exercise the body and camera against a live 1.21.4 protocol server
         working-directory: minecraft
+        env:
+          AIAM_TEST_REQUIRE_COLLECT: '1'
         run: node test/live-survival.cjs
 
   browser-smoke:
