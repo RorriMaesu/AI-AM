@@ -85,3 +85,18 @@ Start with one character and give it the goal “Collect one visible log, craft 
 Once gathering and crafting work on your server, start a fresh Survival world during daylight and watch the character try to stay fed and sheltered until dawn. Record the game time, deaths, and any operator help so you can compare runs.
 
 The hosted live test exercises the production bridge and camera through Minecraft 1.21.4 packets using the open-source Flying Squid server. Its flat fixture tests joining, looking, movement, collection, camera updates, and cancellation. Crafting receipts are reported separately because the compatibility server's inventory behavior can differ from vanilla.
+
+## Prepare a Bedrock observer
+
+A Bedrock client can observe the same Java world through Geyser and ViaProxy. ViaProxy translates the Java protocol used by Geyser to the server's pinned 1.21.4 protocol. The Java server and AI-AM still use their existing loopback ports.
+
+From a non-C checkout, preview and stage the bridge in a new directory.
+
+```powershell
+.\prepare_bedrock.ps1 -DataDir T:\AIAM-Fishbowl\bedrock-proxy -Plan
+.\prepare_bedrock.ps1 -DataDir T:\AIAM-Fishbowl\bedrock-proxy
+```
+
+Preparation checks the upstream SHA-256 digests, writes the proxy configuration, and records the exact paths in `prepared-bedrock.json`. The bridge is staged for review. Its Bedrock listener is configured for loopback at this point.
+
+Before running it on a Windows PC, choose a compatible Bedrock release and configure a dedicated, access-restricted local listener. Current Bedrock uses NetherNet, which requires a non-loopback bind address with Geyser. Plan TCP and UDP access together and keep the Java backend loopback-only. Microsoft's same-machine Bedrock guidance also describes the Windows app loopback exception. Verify the actual listener, firewall policy, and Bedrock join before relying on this setup. [Geyser version support](https://geysermc.org/wiki/geyser/supported-versions/) · [Geyser networking options](https://geysermc.org/wiki/geyser/geyser-command-line-arguments-and-system-properties/) · [Minecraft for Windows loopback guidance](https://learn.microsoft.com/en-us/minecraft/creator/documents/bedrockserver/getting-started?view=minecraft-bedrock-stable#enable-loopback)

@@ -1,0 +1,66 @@
+name: Bedrock proxy preparation
+
+on:
+  pull_request:
+    paths:
+      - prepare_bedrock.ps1
+      - .github/workflows/bedrock-prepare.yml
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify preview creates no files
+        run: |
+          $preview = Join-Path $env:RUNNER_TEMP 'ai-am-bedrock-preview'
+          .\prepare_bedrock.ps1 -DataDir $preview -Plan
+          if (Test-Path -LiteralPath $preview) { throw 'The preview wrote files.' }
+      - name: Stage verified jars and smoke-test the proxy listeners
+        run: |
+          $dataDir = Join-Path $env:RUNNER_TEMP 'ai-am-bedrock-proxy'
+          .\prepare_bedrock.ps1 -DataDir $dataDir
+          $tempDir = Join-Path $dataDir 'ci-temp'
+          $null = New-Item -Path $tempDir -ItemType Directory
+          $env:TEMP = $tempDir
+          $env:TMP = $tempDir
+
+          # The runner uses a disposable NIC. Real-machine firewall and client
+          # configuration are deliberately separate from preparation.
+          $nic = Get-NetIPAddress -AddressFamily IPv4 |
+              Where-Object { $_.IPAddress -match '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' -and $_.AddressState -eq 'Preferred' } |
+              Select-Object -First 1
+          if (!$nic) { throw 'No private IPv4 address is available on this runner.' }
+          $address = $nic.IPAddress
+          $out = Join-Path $dataDir 'proxy-out.log'
+          $err = Join-Path $dataDir 'proxy-err.log'
+          $java = Join-Path $env:JAVA_HOME 'bin\java.exe'
+          $argsLine = "-Djava.io.tmpdir=$tempDir -Duser.home=$dataDir -DgeyserUdpAddress=$address -DgeyserAdvertiseAddresses=$address -Xms128M -Xmx768M -jar ViaProxy-3.4.14.jar config viaproxy.yml"
+          $proc = Start-Process -FilePath $java -ArgumentList $argsLine -WorkingDirectory $dataDir -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          try {
+              $deadline = (Get-Date).AddSeconds(90)
+              do {
+                  if ($proc.HasExited) { throw "Proxy exited with code $($proc.ExitCode)." }
+                  $javaPort = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 25568 -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue
+                  $signal = Get-NetTCPConnection -LocalAddress $address -LocalPort 19132 -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue
+                  $transport = Get-NetUDPEndpoint -LocalAddress $address -LocalPort 19132 -OwningProcess $proc.Id -ErrorAction SilentlyContinue
+                  if ($javaPort -and $signal -and $transport) { break }
+                  Start-Sleep -Seconds 1
+              } while ((Get-Date) -lt $deadline)
+              if (!$javaPort -or !$signal -or !$transport) { throw 'The expected proxy listeners did not start.' }
+              Write-Host 'ViaProxy is listening on loopback. Geyser NetherNet opened TCP and UDP on the private runner address.'
+          } finally {
+              if (!$proc.HasExited) { Stop-Process -InputObject $proc }
+              Get-Content -LiteralPath $out,$err -Tail 65
+          }
