@@ -345,3 +345,35 @@ def test_unrepaired_fabricated_evidence_is_not_accepted():
             with pytest.raises(InferenceError, match="one repair attempt"):
                 await OllamaBackend(settings(), client).infer("buddhi", {"current_event": {"id": "real"}})
     asyncio.run(run())
+
+def test_complete_decision_is_required_by_ollama_schema():
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": '{"action":"calculate","expression":"17*23"}'}})
+    async def run():
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
+            await OllamaBackend(settings(), client).infer("buddhi", {})
+    asyncio.run(run())
+    schema = calls[0]["format"]
+    assert set(schema["required"]) == set(schema["properties"])
+    assert "expression" in schema["required"]
+
+def test_unsupported_raw_memory_replacement_is_repaired_before_commit():
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content))
+        result = {"reply":"The notebook is green.","memory_updates":[]}
+        if len(calls) == 1:
+            result["memory_updates"] = [{"content":"I will remember green.","kind":"commitment",
+                "source_event_ids":["current"],"supersedes":"raw-memory"}]
+        return httpx.Response(200, json={"message":{"content":json.dumps(result)}})
+    async def run():
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
+            result, _ = await OllamaBackend(settings(), client).infer("buddhi", {
+                "current_event":{"id":"current","kind":"user"},
+                "memories":[{"id":"raw-memory","kind":"user_statement","source_event_ids":["old"]}]})
+            assert result["memory_updates"] == []
+    asyncio.run(run())
+    assert len(calls) == 2
+    assert "Recall alone needs no memory update" in calls[1]["messages"][-1]["content"]

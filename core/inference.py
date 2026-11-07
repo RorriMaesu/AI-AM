@@ -71,6 +71,9 @@ def _episode_schema(role, schema, payload):
     if role == "chitta":
         restrict(result["properties"]["selected_memory_ids"], memory_ids)
     elif role == "buddhi":
+        # Optional JSON properties let some local models omit action operands
+        # even after repair. Require a complete decision at decoding time.
+        result["required"] = list(result["properties"])
         restrict(result["properties"]["evidence_ids"], memory_ids | event_ids)
         proposal = result["$defs"]["MemoryProposal"]["properties"]
         restrict(proposal["source_event_ids"], event_ids)
@@ -83,7 +86,7 @@ def _episode_schema(role, schema, payload):
     return result, memory_ids, event_ids
 
 
-def _validate_episode_ids(role, result, memory_ids, event_ids):
+def _validate_episode_ids(role, result, memory_ids, event_ids, payload):
     if role == "chitta" and not set(result.selected_memory_ids).issubset(memory_ids):
         raise ValueError("selected_memory_ids must use only the supplied retrieved memory IDs")
     if role == "buddhi":
@@ -94,6 +97,13 @@ def _validate_episode_ids(role, result, memory_ids, event_ids):
                 raise ValueError("memory_updates.source_event_ids must cite supplied source events")
             if proposal.supersedes and proposal.supersedes not in memory_ids:
                 raise ValueError("memory_updates.supersedes must identify a retrieved memory")
+            if proposal.supersedes:
+                current = payload.get("current_event") or {}
+                if current.get("kind") != "user" or current.get("id") not in proposal.source_event_ids:
+                    raise ValueError("A correction requires the current user event as its source; omit unsupported memory updates.")
+                target = next(m for m in payload["memories"] if m["id"] == proposal.supersedes)
+                if target.get("kind") in ("user_statement", "observation") and proposal.kind not in ("user_statement", "observation"):
+                    raise ValueError("Inferences, reflections and commitments cannot replace raw evidence. Remove that update. Recall alone needs no memory update.")
 
 class InferenceError(RuntimeError):
     """A model call failed; callers must preserve the pending interaction."""
@@ -188,7 +198,7 @@ class OllamaBackend:
             try:
                 parsed = json.loads(content)
                 result = schema.model_validate(parsed)
-                _validate_episode_ids(role, result, memory_ids, event_ids)
+                _validate_episode_ids(role, result, memory_ids, event_ids, payload)
                 return result.model_dump(), token_count
             except (ValueError, TypeError) as exc:
                 if attempt:
