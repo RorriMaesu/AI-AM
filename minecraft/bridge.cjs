@@ -85,12 +85,14 @@ class AgentBody {
     this.leaseUntil = 0; this.lastReflex = 0; this.emergency = false; this.closed = false
     this.lastProgress = null; this.timer = null
     bot.on('spawn', () => { this.connected = true; this.alive = bot.health > 0; this.observations.clear() })
+    // Mineflayer emits the initial spawn before assigning health from the same packet.
+    bot.on('health', () => { if (this.connected) this.alive = bot.health > 0 })
     bot.on('death', () => {
       this.alive = false; this.death = { id: 'death:' + this.session + ':' + ++this.sequence, at: this.clock() }
       this.stop('death')
     })
     bot.on('end', reason => {
-      this.connected = false; this.enabled = false; this.observations.clear()
+      this.connected = false; this.alive = false; this.enabled = false; this.observations.clear()
       this.interrupt('connection ended: ' + String(reason).slice(0, 120), 'outcome_unknown')
     })
     bot.on('kicked', reason => { this.lastError = 'kicked: ' + String(reason).slice(0, 200) })

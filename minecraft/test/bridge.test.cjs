@@ -16,7 +16,7 @@ function fixture (options = {}) {
     blocks.set(key(b.position), b); return b
   }
   bot.game = { gameMode: 'survival', dimension: 'overworld' }
-  bot.username = 'AI_AM'; bot.health = 20; bot.food = 20; bot.oxygenLevel = 20
+  bot.username = 'AI_AM'; bot.health = options.healthPending ? undefined : 20; bot.food = 20; bot.oxygenLevel = 20
   bot.entity = { id: 1, position: new Vec3(0, 64, 0), yaw: 0, pitch: 0, height: 1.8 }
   bot.entities = {}; bot.players = {}; bot.time = { day: 0, timeOfDay: 1000, isDay: true }
   bot.inventory = { items: () => items.filter(i => i.count > 0) }
@@ -53,6 +53,18 @@ test('configuration permits only private loopback version-pinned distinct agents
   assert.throws(() => validateConfig({ ...config(), agents: [{ id: 'a', username: 'A', viewer_port: 8766 }] }))
   assert.throws(() => validateConfig({ ...config(), agents: [config().agents[0], config().agents[0]] }))
 })
+test('initial health arriving after spawn makes the connected body ready', () => {
+  const { bot, body } = fixture({ healthPending: true })
+  assert.equal(body.connected, true)
+  assert.equal(body.alive, false)
+  bot.health = 20
+  bot.emit('health')
+  assert.equal(body.observe().alive, true)
+  assert.equal(body.start().enabled, true)
+  bot.emit('end', 'test disconnected')
+  assert.equal(body.observe().alive, false)
+})
+
 test('API requires exact token, loopback peer, legitimate Host and same origin', () => {
   const req = { socket: { remoteAddress: '127.0.0.1' }, headers: { host: '127.0.0.1:8766', authorization: 'Bearer secret' } }
   assert(authorized(req, 'secret')); assert(!authorized(req, 'secre'))
