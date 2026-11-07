@@ -127,10 +127,11 @@
               <button type="button" class="button button-outline" data-world-action="wait">Wait</button>
             </div>
             <div class="experiment-inline-fields">
-              <label>Target<select id="world-target"><option value="">Automatic</option><option value="key">Key</option><option value="cup">Cup</option></select></label>
-              <label>Confidence<input id="world-confidence" type="number" min="0" max="1" step="0.1" value="0.5"></label>
+              <label>Target<select id="world-target"><option value="">Automatic</option></select></label>
+              <label>Stated confidence<input id="world-confidence" type="number" min="0" max="1" step="0.1" value="0.5"></label>
             </div>
             <label class="experiment-field">Prediction before your next action<input id="world-prediction" type="text" maxlength="1000" placeholder="Optional: what do you expect to happen?"></label>
+            <p class="empty-note">Your statement and confidence are recorded, but unscored. Calibration measures the simulator’s pose forecast against the next observation.</p>
             <p class="experiment-note">Manual controls are recorded as user-directed actions. This world is simulated; it does not control your computer or a robot.</p>
           </section>
           <section class="experiment-card">

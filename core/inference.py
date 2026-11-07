@@ -56,10 +56,14 @@ def _action_evidence(payload):
     return evidence, events
 
 
-def _context_payload(payload, num_ctx, max_chars=None):
-    """Bound redundant context while preserving the current event and source IDs."""
+
+def _context_payload(payload, num_ctx, max_chars=None, compact_level=0):
+    """Fit context without shortening current input or current sensory evidence.
+
+    Model-written proposals may be abridged; source records are kept complete
+    or omitted explicitly. Ledger order is newest first, chat history oldest first.
+    """
     prepared = copy.deepcopy(payload)
-    experiment = prepared.get("experiment")
     private_fields = {"ground_truth", "evaluator", "world_state", "private_state",
                       "world", "evaluator_only", "controls", "walls"}
     def contains_private(value):
@@ -68,17 +72,20 @@ def _context_payload(payload, num_ctx, max_chars=None):
         if isinstance(value, list):
             return any(contains_private(v) for v in value)
         return False
-    if contains_private(experiment):
+    if contains_private(prepared.get("experiment")):
         raise InferenceError("Evaluator world state must never enter a cognitive payload.")
     workspace = prepared.get("workspace")
     if isinstance(workspace, dict):
-        workspace.pop("memories", None)  # Already supplied as top-level evidence.
+        workspace.pop("memories", None)
+        manas = workspace.get("manas") or {}
+        for key in ("observations", "interpretations", "uncertainties"):
+            if isinstance(manas, dict) and workspace.get(key) == manas.get(key):
+                workspace.pop(key, None)
         attention = workspace.get("attention")
         if isinstance(attention, dict):
             selected = set(attention.get("selected_ids") or [])
-            items = attention.get("items")
-            if isinstance(items, list):
-                attention["items"] = [item for item in items
+            if isinstance(attention.get("items"), list):
+                attention["items"] = [item for item in attention["items"]
                                       if isinstance(item, dict) and item.get("id") in selected]
             if isinstance(attention.get("missed"), list):
                 attention["missed"] = attention["missed"][:4]
@@ -88,80 +95,123 @@ def _context_payload(payload, num_ctx, max_chars=None):
     if isinstance(ledger, list) and len(ledger) > 12:
         prepared["action_ledger"] = ledger[:12]
         prepared["action_ledger_omitted"] = len(ledger) - 12
+        rules = prepared.get("rules")
+        if isinstance(rules, dict):
+            rules.pop("event_ids", None)
+            rules.pop("evidence_ids", None)
     budget = min(MAX_PAYLOAD_CHARS, int(num_ctx) * 3)
     if max_chars is not None:
         budget = min(budget, max(0, int(max_chars)))
-    serialized = json.dumps(prepared, ensure_ascii=False, allow_nan=False)
-    if len(serialized) <= budget:
-        return serialized
-    history = prepared.get("history")
-    if isinstance(history, list):
-        prepared["history"] = history[-4:]
 
-    def compact(value, key=""):
+    def serialized():
+        return json.dumps(prepared, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+
+    def proposals(value, limit, count, key=""):
         if key == "id" or key.endswith("_id") or key.endswith("_ids"):
             return value
         if isinstance(value, str):
-            return value if len(value) <= 1000 else value[:960] + " [earlier proposal abridged]"
+            return value if len(value) <= limit else value[:limit] + " [proposal abridged]"
         if isinstance(value, list):
-            return [compact(item) for item in value[:8]]
+            return [proposals(item, limit, count) for item in value[:count]]
         if isinstance(value, dict):
-            return {name: compact(item, name) for name, item in value.items()}
+            return {name: proposals(item, limit, count, name) for name, item in value.items()}
         return value
 
-    if isinstance(workspace, dict):
-        prepared["workspace"] = compact(workspace)
-    def serialized_payload():
-        return json.dumps(prepared, ensure_ascii=False, allow_nan=False)
-    serialized = serialized_payload()
-    if len(serialized) <= budget:
-        return serialized
-    # Compact redundant historical state first. Current input, current sensory
-    # observation, identifiers, action outcomes, and lifecycle statuses stay intact.
-    if isinstance(prepared.get("focus"), list):
-        prepared["focus"] = [{key: value for key, value in item.items() if key != "score_components"}
-                             if isinstance(item, dict) else item for item in prepared["focus"]]
-    if isinstance(experiment, dict):
-        experiment = prepared["experiment"]
-        if isinstance(experiment.get("history"), list):
-            experiment["history"] = experiment["history"][-1:]
-        if isinstance(experiment.get("beliefs"), list):
-            experiment["beliefs"] = experiment["beliefs"][:8]
-    if isinstance(prepared.get("action_ledger"), list):
-        trimmed = []
-        for record in prepared["action_ledger"]:
-            if not isinstance(record, dict):
-                continue
-            record = copy.deepcopy(record)
-            # Transitions can repeat a complete observation. The authoritative
-            # latest status and tool event remain, and previous entries are retrievable.
-            record.pop("transitions", None)
-            record.pop("history", None)
-            for key in ("result", "prediction"):
-                if isinstance(record.get(key), dict):
-                    record[key] = {name: value for name, value in record[key].items()
-                                   if name not in {"observation", "visible_cells", "beliefs", "history"}}
-            trimmed.append(record)
-        prepared["action_ledger"] = trimmed
-    serialized = serialized_payload()
-    if len(serialized) <= budget:
-        return serialized
-    # Prefer fewer complete source records to truncated quotations. Fields which
-    # identify omitted records are removed from supplied evidence permissions too.
-    for keep in (4, 2, 1):
-        if isinstance(prepared.get("history"), list):
-            prepared["history"] = prepared["history"][-keep:]
-        if isinstance(prepared.get("action_ledger"), list):
-            prepared["action_ledger"] = prepared["action_ledger"][:keep]
-        if isinstance(prepared.get("memories"), list):
-            prepared["memories"] = prepared["memories"][:keep]
-        if isinstance(prepared.get("rules"), dict):
-            rules = prepared["rules"]
+    def shrink(level):
+        nonlocal workspace
+        text_limit, list_limit = ((400, 4) if level == 1 else (220, 3) if level == 2 else (140, 2))
+        workspace = prepared.get("workspace")
+        if isinstance(workspace, dict):
+            # These fields are generated assessments, not immutable evidence.
+            for name in ("manas", "chitta", "self_assessment", "attention_probe"):
+                if isinstance(workspace.get(name), dict):
+                    workspace[name] = proposals(workspace[name], text_limit, list_limit)
+            for name in ("observations", "interpretations", "uncertainties"):
+                if name in workspace:
+                    workspace[name] = proposals(workspace[name], text_limit, list_limit)
+            if isinstance(workspace.get("decision"), dict):
+                workspace["decision"] = {key: value for key, value in workspace["decision"].items()
+                                         if key in {"action", "query", "expression", "environment_action",
+                                                    "target", "prediction", "prediction_confidence", "evidence_ids"}}
+            attention = workspace.get("attention")
+            if isinstance(attention, dict):
+                attention.pop("broadcasts", None)
+                attention.pop("items", None)  # Selected contents are supplied once in focus.
+                if isinstance(attention.get("missed"), list):
+                    attention["missed"] = proposals(attention["missed"], text_limit, list_limit)
+        focus = prepared.get("focus")
+        if isinstance(focus, list):
+            prepared["focus"] = [proposals({k: v for k, v in item.items() if k != "score_components"},
+                                           text_limit, list_limit)
+                                 if isinstance(item, dict) else item for item in focus]
+        experiment = prepared.get("experiment")
+        if isinstance(experiment, dict):
+            for key in ("history", "recent_transitions"):
+                if isinstance(experiment.get(key), list):
+                    experiment[key + "_omitted"] = len(experiment[key])
+                    experiment.pop(key)
+            if not _environment_allowed(prepared):
+                experiment.pop("action_predictions", None)
+            if isinstance(experiment.get("beliefs"), list):
+                keep = 8 if level == 1 else 4
+                if len(experiment["beliefs"]) > keep:
+                    experiment["beliefs_omitted"] = len(experiment["beliefs"]) - keep
+                    experiment["beliefs"] = experiment["beliefs"][:keep]
+        ledger = prepared.get("action_ledger")
+        if isinstance(ledger, list):
+            trimmed = []
+            for record in ledger:
+                if not isinstance(record, dict):
+                    continue
+                record = copy.deepcopy(record)
+                record.pop("transitions", None)
+                record.pop("history", None)
+                for key in ("result", "prediction"):
+                    if isinstance(record.get(key), dict):
+                        record[key] = {name: value for name, value in record[key].items()
+                                       if name not in {"observation", "visible_cells", "beliefs", "history"}}
+                trimmed.append(record)
+            keep = 6 if level == 1 else 4 if level == 2 else 2
+            prepared["action_ledger"] = trimmed[:keep]
+            if len(trimmed) > keep:
+                prepared["action_ledger_omitted"] = prepared.get("action_ledger_omitted", 0) + len(trimmed) - keep
+        history = prepared.get("history")
+        if isinstance(history, list):
+            keep = 6 if level == 1 else 4 if level == 2 else 2
+            prepared["history"] = history[-keep:]
+        memories = prepared.get("memories")
+        if isinstance(memories, list):
+            keep = 6 if level == 1 else 4 if level == 2 else 2
+            preferred = set((prepared.get("workspace") or {}).get("chitta", {}).get("selected_memory_ids", []))
+            ordered = [m for m in memories if isinstance(m, dict) and m.get("id") in preferred]
+            ordered.extend(m for m in memories if not isinstance(m, dict) or m.get("id") not in preferred)
+            prepared["memories"] = ordered[:keep]
+            if len(memories) > keep:
+                prepared["memories_omitted"] = len(memories) - keep
+            kept_ids = {m["id"] for m in prepared["memories"] if isinstance(m, dict) and "id" in m}
+            chitta = (prepared.get("workspace") or {}).get("chitta")
+            if isinstance(chitta, dict):
+                chitta["selected_memory_ids"] = [i for i in chitta.get("selected_memory_ids", []) if i in kept_ids]
+        self_model = prepared.get("self_model")
+        if isinstance(self_model, dict) and self_model.get("commitment_records"):
+            self_model.pop("commitments", None)  # Legacy prose duplicates the stable records.
+        rules = prepared.get("rules")
+        if isinstance(rules, dict):
+            # Enums are recomputed from records actually present.
+            # Avoid repeating and authorizing omitted IDs.
             rules.pop("evidence_ids", None)
             rules.pop("event_ids", None)
-        serialized = serialized_payload()
-        if len(serialized) <= budget:
-            return serialized
+
+    if compact_level:
+        shrink(compact_level)
+    result = serialized()
+    if len(result) <= budget:
+        return result
+    for level in range(max(1, compact_level + 1), 4):
+        shrink(level)
+        result = serialized()
+        if len(result) <= budget:
+            return result
     raise InferenceError("Cognitive context budget exceeded. Shorten the input or increase num_ctx in settings.")
 
 
@@ -325,21 +375,30 @@ class OllamaBackend:
             raise ValueError("Unknown cognitive role.")
         schema = ROLE_SCHEMAS[role]
         model = validate_model_name(self.config["roles"][role]["model"])
-        serialized = _context_payload(payload, self.config.get("num_ctx", 8192))
-        supplied = json.loads(serialized)
-        output_schema, memory_ids, event_ids = _episode_schema(role, schema.model_json_schema(), supplied)
-        # The format parameter constrains decoding. The prompt also needs to
-        # communicate the fields and their meaning to the model.
-        system_prompt = ROLE_PROMPTS[role] + "\nOutput JSON schema:\n" + json.dumps(output_schema, separators=(",", ":"))
         total_budget = min(MAX_PAYLOAD_CHARS, max(0, (
             self.config.get("num_ctx", 8192) - self.config.get("max_output_tokens", 1600) - 256
         ) * 3))
-        if len(system_prompt) + len(serialized) > total_budget:
-            serialized = _context_payload(supplied, self.config.get("num_ctx", 8192),
-                                          max_chars=total_budget - len(system_prompt))
+        for level in range(4):
+            try:
+                serialized = _context_payload(payload, self.config.get("num_ctx", 8192), compact_level=level)
+            except InferenceError:
+                if level == 3:
+                    raise
+                continue
             supplied = json.loads(serialized)
             output_schema, memory_ids, event_ids = _episode_schema(role, schema.model_json_schema(), supplied)
-            system_prompt = ROLE_PROMPTS[role] + "\nOutput JSON schema:\n" + json.dumps(output_schema, separators=(",", ":"))
+            # Refit after each reduction: source enums themselves consume context.
+            prompt = ROLE_PROMPTS[role]
+            if role == "buddhi" and not _environment_allowed(supplied):
+                begin = prompt.find("Use action=environment only")
+                finish = prompt.find("commitment_updates require", begin)
+                if begin >= 0 and finish >= 0:
+                    prompt = prompt[:begin] + "Environment actions are not authorized in this conversation.\n" + prompt[finish:]
+            system_prompt = prompt + "\nOutput JSON schema:\n" + json.dumps(output_schema, separators=(",", ":"))
+            if len(system_prompt) + len(serialized) <= total_budget:
+                break
+        else:
+            raise InferenceError("Complete cognitive context budget exceeded, including schema. Increase num_ctx or shorten the input.")
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": serialized},

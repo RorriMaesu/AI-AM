@@ -143,7 +143,21 @@
       prediction: text(action.prediction || ""), id: text(action.id || action.action_id || "") };
   }
 
-  var helpers = { normalizeWorld: normalizeWorld, boundedRecords: boundedRecords, actionSummary: actionSummary,  tokenizeCode: tokenizeCode, renderText: renderText, formatDuration: formatDuration, messageKind: messageKind, mergeEvents: mergeEvents, facultyStatus: facultyStatus, modelName: modelName, extractEvidence: extractEvidence, snapshotFaculties: snapshotFaculties, eventError: eventError, validateInput: validateInput };
+  function worldTargets(view) {
+    var observation = view && view.observation || {}, model = view && view.model || {}, targets = new Map();
+    boundedRecords(observation.objects, 20).concat(boundedRecords(view && view.beliefs || model.beliefs, 20)).forEach(function (item) {
+      var id = item.id || item.object_id;
+      if (typeof id === "string" && id.length > 0 && id.length <= 32 && !targets.has(id)) targets.set(id, { id: id, name: text(item.name || id) });
+    });
+    (Array.isArray(observation.inventory) ? observation.inventory : []).slice(0,20).forEach(function (id) {
+      if (typeof id === "string" && id.length > 0 && id.length <= 32 && !targets.has(id)) targets.set(id, { id: id, name: id });
+    });
+    return Array.from(targets.values()).slice(0,20);
+  }
+  function worldActionTarget(action, selected) {
+    return ["inspect", "pick_up", "drop"].indexOf(action) >= 0 ? String(selected || "") : "";
+  }
+  var helpers = { worldTargets: worldTargets, worldActionTarget: worldActionTarget, normalizeWorld: normalizeWorld, boundedRecords: boundedRecords, actionSummary: actionSummary,  tokenizeCode: tokenizeCode, renderText: renderText, formatDuration: formatDuration, messageKind: messageKind, mergeEvents: mergeEvents, facultyStatus: facultyStatus, modelName: modelName, extractEvidence: extractEvidence, snapshotFaculties: snapshotFaculties, eventError: eventError, validateInput: validateInput };
   if (typeof module !== "undefined" && module.exports) module.exports = helpers;
   if (typeof document === "undefined") return;
 
@@ -349,6 +363,13 @@
     var names = boundedRecords(observation.objects, 20).map(function (item) { return item.name || item.id; });
     $("world-observation").appendChild(el("span", "", "Visible: " + (names.join(", ") || "no objects")));
 
+    var targetSelect = $("world-target"), selectedTarget = targetSelect.value; clear(targetSelect);
+    var automatic = el("option", "", "Automatic"); automatic.value = ""; targetSelect.appendChild(automatic);
+    worldTargets(view).forEach(function (item) {
+      var option = el("option", "", item.name); option.value = item.id; targetSelect.appendChild(option);
+    });
+    targetSelect.value = Array.from(targetSelect.options).some(function (option) { return option.value === selectedTarget; }) ? selectedTarget : "";
+
     var run = view.run || {};
     $("experiment-run-status").textContent = run.active ? "RUNNING · " + text(run.remaining_steps) + " LEFT" : (state.paused === true || state.status === "paused" ? "RESUME THE MIND TO RUN" : humanize(run.status || "ready").toUpperCase());
 
@@ -366,10 +387,11 @@
     boundedRecords(view.predictions || model.predictions || model.history, 8).reverse().forEach(function (item) {
       var expected = item.expected || item.prediction || item.expected_observation || item.predicted_pose || item.predicted_effect || item.description || "";
       var actual = item.actual || item.outcome || item.observed || item.effect || "";
-      var details = (expected ? "Expected: " + text(expected) : "") + (actual ? "\nObserved: " + text(actual) : "");
+      var details = (expected ? "Expected: " + text(expected) : "") + (actual ? "\nObserved: " + text(actual) : "") +
+        (item.statement ? "\nStated expectation (unscored): " + text(item.statement) : "");
       appendExperimentRecord(predictions, humanize(item.action || item.action_id || "Prediction"), details,
         [item.status || "", item.error !== undefined ? "Error " + text(item.error) : item.prediction_error !== undefined && item.prediction_error !== null ? "Brier error " + text(item.prediction_error) : "",
-          item.confidence !== undefined ? "Confidence " + Number(item.confidence).toFixed(2) : ""].filter(Boolean).join(" · "));
+          item.confidence !== undefined ? "Pose forecast probability " + Number(item.confidence).toFixed(2) : ""].filter(Boolean).join(" · "));
     });
     boundedRecords(model.discrepancies || view.discrepancies, 4).forEach(function (item) {
       appendExperimentRecord(predictions, "Expectation revised", item.content || item.description || item.reason || text(item), "Observed discrepancy");
@@ -394,10 +416,13 @@
   }
   async function refreshExperiment() {
     if (experimentFlight) return experimentFlight;
-    var observerRequested = $("observer-toggle").checked;
     experimentFlight = (async function () {
       experimentView = await api("/api/experiment");
-      evaluatorView = observerRequested ? await api("/api/experiment/evaluator") : null;
+      // Read the toggle after the await: it may change during the public request.
+      if ($("observer-toggle").checked) {
+        var receivedEvaluator = await api("/api/experiment/evaluator");
+        evaluatorView = $("observer-toggle").checked ? receivedEvaluator : null;
+      } else { evaluatorView = null; }
       renderExperiment();
     })().finally(function () { experimentFlight = null; });
     return experimentFlight;
@@ -421,8 +446,8 @@
     document.querySelectorAll("[data-world-action]").forEach(function (button) {
       button.addEventListener("click", function () {
         var confidence = Number($("world-confidence").value);
-        if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) { announce("Confidence must be between 0 and 1.", true); return; }
-        experimentMutation("step", { action: button.dataset.worldAction, target: $("world-target").value,
+        if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) { announce("Stated confidence must be between 0 and 1.", true); return; }
+        experimentMutation("step", { action: button.dataset.worldAction, target: worldActionTarget(button.dataset.worldAction, $("world-target").value),
           prediction: $("world-prediction").value.trim(), confidence: confidence });
       });
     });

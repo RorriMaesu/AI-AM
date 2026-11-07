@@ -214,6 +214,7 @@ def check_experiment(page, server, artifacts):
     assert "world" not in public and not public.get("evaluator_only")
     assert public["observation"]["pose"]["position"] == [2, 3]
     assert "cup" not in [item["id"] for item in public["observation"]["objects"]]
+    expect(page.locator('#world-target option[value="cup"]')).to_have_count(0)
     assert page.locator('#world-grid .world-cell[data-known="false"]').count() > 0
     assert "cup" not in " ".join(page.locator("#world-grid .world-cell").evaluate_all(
         "(cells) => cells.map(cell => cell.getAttribute('aria-label'))")).lower()
@@ -240,10 +241,12 @@ def check_experiment(page, server, artifacts):
     after_change = get_json(page, server, "/api/experiment")
     assert after_change["observation"] == public["observation"], "An unseen intervention cannot rewrite the agent's observation"
 
+    page.locator("#world-target").select_option("key")
     with page.expect_response(lambda response: response.url.endswith("/api/experiment/step")
                               and response.request.method == "POST") as stepped:
         page.locator('[data-world-action="turn_left"]').click()
     assert stepped.value.ok, stepped.value.text()
+    assert stepped.value.request.post_data_json["target"] == "", "Turning must ignore the selected object target"
     page.wait_for_function("""async () => {
         const view = await (await fetch('/api/experiment')).json();
         return view.observation.pose.heading === 'north';

@@ -210,3 +210,17 @@ test("record display bounds preserve stable IDs from keyed belief maps", () => {
     [{ id: "cup", kind: "remembered" }]);
   assert.deepEqual(ui.boundedRecords([null, "text", { id: "x" }], 5), [{ id: "x" }]);
 });
+
+test("manual targets use only public object knowledge", () => {
+  const view = { observation: { objects: [{ id: "key", name: "Key" }], inventory: ["coin"] },
+    model: { beliefs: { key: { name: "Key" }, book: { name: "Remembered book" } } },
+    evaluator_only: true, world: { objects: { cup: { name: "Secret cup" } } } };
+  assert.deepEqual(ui.worldTargets(view), [{ id: "key", name: "Key" }, { id: "book", name: "Remembered book" }, { id: "coin", name: "coin" }]);
+  assert.deepEqual(ui.worldTargets({}), []);
+});
+
+test("manual movement and sensing actions ignore an object target left selected", () => {
+  ["look", "turn_left", "turn_right", "move_forward", "wait"].forEach(action => assert.equal(ui.worldActionTarget(action, "key"), ""));
+  ["inspect", "pick_up", "drop"].forEach(action => assert.equal(ui.worldActionTarget(action, "key"), "key"));
+  assert.equal(ui.worldActionTarget("inspect", ""), "");
+});

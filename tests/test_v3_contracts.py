@@ -188,6 +188,111 @@ class TestActiveMindContracts(unittest.TestCase):
         self.assertEqual(len(sent), 2)
         self.assertNotIn("environment", sent[0]["format"]["properties"]["action"]["enum"])
 
+
+    def test_focused_memory_ids_never_become_source_event_ids(self):
+        data = payload()
+        data["memories"] = [{"id": "remembered-1", "content": "A memory.",
+                             "source_event_ids": ["source-1"]}]
+        data["focus"] = [{"id": "memory:remembered-1", "memory_id": "remembered-1",
+                          "source_ids": ["remembered-1", "source-1", "omitted-source"],
+                          "text": "A memory cue."}]
+        schema, memory_ids, event_ids = _episode_schema("buddhi", BuddhiResult.model_json_schema(), data)
+        self.assertIn("remembered-1", memory_ids)
+        self.assertIn("source-1", event_ids)
+        self.assertNotIn("remembered-1", event_ids)
+        self.assertNotIn("omitted-source", event_ids)
+        with self.assertRaisesRegex(ValueError, "source events"):
+            validate({"reply": "A cue is not a source event.", "memory_updates": [{
+                "content": "A claim.", "kind": "inference",
+                "source_event_ids": ["remembered-1"]}]}, data)
+
+    def test_two_simulator_actions_then_chat_fit_complete_context(self):
+        data = payload()
+        data["current_event"] = {"id": "third-event", "kind": "user",
+                                 "content": "What did you actually do, and what did you only predict?"}
+        data["rules"] = {"environment_enabled": False,
+                         "available_actions": ["reply", "retrieve", "reconsider", "calculate"],
+                         "event_ids": ["omitted-event"], "evidence_ids": ["omitted-action"]}
+        observation = data["experiment"]["observation"]
+        observation.update(tick=2, inventory=["key"], objects=[], energy=98,
+                           visible_cells=[{"position": [x, y], "kind": "floor"}
+                                          for x in range(3, 7) for y in range(1, 6)])
+        data["experiment"]["recent_transitions"] = [
+            {"tick": i, "observation": observation,
+             "forecast": {"basis": "A prediction, not an observation. " * 90}}
+            for i in range(4)]
+        data["experiment"]["action_predictions"] = [
+            {"action": action, "predicted_pose": {"position": [4, 3], "heading": "east"},
+             "confidence": 0.6, "samples": 1, "basis": "Past transition."}
+            for action in ("move_forward", "turn_left", "turn_right")]
+        data["experiment"]["beliefs"] = [{"id": str(i), "claim": "A tentative map belief. " * 8}
+                                           for i in range(12)]
+        data["action_ledger"] = [
+            {"id": "action-pickup", "event_id": "outcome-pickup", "actor": "self",
+             "tool": "simulator", "status": "succeeded",
+             "parameters": {"action": "pick_up", "target": "key"},
+             "prediction": {"statement": "The key will be in inventory.", "reported_confidence": 0.8},
+             "result": {"ok": True, "reason": "Picked up key.", "observation": observation}},
+            {"id": "action-move", "event_id": "outcome-move", "actor": "self",
+             "tool": "simulator", "status": "succeeded",
+             "parameters": {"action": "move_forward"},
+             "prediction": {"statement": "I will move east.", "reported_confidence": 0.7},
+             "result": {"ok": True, "reason": "Moved forward.", "observation": observation}}]
+        data["history"] = [{"id": "history-" + str(i), "kind": "user", "content": "Prior dialogue. " * 60}
+                           for i in range(10)]
+        data["memories"] = [{"id": "memory-" + str(i), "kind": "observation",
+                             "content": "Previously recorded evidence. " * 45,
+                             "source_event_ids": ["memory-source-" + str(i)]} for i in range(8)]
+        assessment = "This is a generated assessment whose wording can be abridged. " * 22
+        data["workspace"]["manas"] = {"observations": [assessment] * 4,
+                                      "interpretations": [assessment] * 4,
+                                      "uncertainties": [assessment] * 4,
+                                      "retrieval_query": "What actions actually succeeded?"}
+        data["workspace"].update(copy.deepcopy(data["workspace"]["manas"]))
+        data["workspace"]["chitta"] = {"selected_memory_ids": ["memory-7"],
+                                       "associations": [assessment] * 4,
+                                       "contradictions": [], "missing_context": []}
+        data["workspace"]["self_assessment"] = {"agency": assessment,
+                                                "capability_limits": [assessment] * 3}
+        data["focus"] = [{"id": "memory:memory-" + str(i), "memory_id": "memory-" + str(i),
+                          "text": assessment[:240], "source_ids": ["memory-" + str(i),
+                                                                    "memory-source-" + str(i)],
+                          "score_components": {"recency": 0.8, "relevance": 0.6}} for i in range(6)]
+        original = copy.deepcopy(data)
+        sent = []
+        def handler(request):
+            if request.url.path == "/api/tags":
+                return httpx.Response(200, json={"models": [{"name": "local:test"}]})
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json={"message": {"content": json.dumps({
+                "reply": "The recorded actions moved forward and picked up the key.",
+                "evidence_ids": ["action-pickup", "action-move", "outcome-pickup", "outcome-move"]})}})
+        async def run():
+            cfg = settings()
+            cfg["max_output_tokens"] = 1600
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                result, _ = await OllamaBackend(cfg, client).infer("buddhi", data)
+                self.assertEqual(result["action"], "reply")
+        asyncio.run(run())
+        self.assertEqual(len(sent), 1)
+        self.assertLessEqual(sum(len(m["content"]) for m in sent[0]["messages"]), (8192 - 1600 - 256) * 3)
+        supplied = json.loads(sent[0]["messages"][1]["content"])
+        self.assertEqual(supplied["current_event"], original["current_event"])
+        self.assertEqual(supplied["experiment"]["observation"], original["experiment"]["observation"])
+        self.assertEqual([item["id"] for item in supplied["action_ledger"][:2]],
+                         ["action-pickup", "action-move"])
+        self.assertEqual([item["result"]["reason"] for item in supplied["action_ledger"][:2]],
+                         ["Picked up key.", "Moved forward."])
+        self.assertNotIn("recent_transitions", supplied["experiment"])
+        self.assertNotIn("observations", supplied["workspace"])
+        selected = next(item for item in supplied["memories"] if item["id"] == "memory-7")
+        self.assertEqual(selected["content"], original["memories"][7]["content"])
+        event_enum = sent[0]["format"]["$defs"]["MemoryProposal"]["properties"]["source_event_ids"]["items"]["enum"]
+        self.assertNotIn("memory-7", event_enum)
+        self.assertNotIn("omitted-event", event_enum)
+        self.assertNotIn("omitted-action", sent[0]["format"]["properties"]["evidence_ids"]["items"]["enum"])
+        self.assertEqual(data, original)
+
     def test_config_defaults_are_bounded_and_do_not_create_state(self):
         with patch.object(config, "ROOT", Path("T:/AIAM_UNWRITTEN_CONFIG_TEST")):
             value = config.load_config()
