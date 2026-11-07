@@ -143,6 +143,8 @@ class TestActiveMindContracts(unittest.TestCase):
         supplied = json.loads(_context_payload(data, 8192))
         self.assertEqual(len(supplied["action_ledger"]), 12)
         self.assertEqual(supplied["action_ledger_omitted"], 18)
+        self.assertEqual(supplied["action_ledger"][0]["id"], "0")
+        self.assertEqual(supplied["action_ledger"][-1]["id"], "11")
         data["experiment"]["oversized"] = "x" * 100_000
         with self.assertRaisesRegex(InferenceError, "context budget"):
             _context_payload(data, 8192)

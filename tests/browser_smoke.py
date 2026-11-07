@@ -205,6 +205,7 @@ def check_experiment(page, server, artifacts):
     expect(page.locator("#world-grid .world-cell")).to_have_count(63)
     expect(page.locator("#observer-toggle")).not_to_be_checked()
     assert not evaluator_requests, "Hidden evaluator truth must not be fetched by ordinary viewing"
+    page.locator(".intervention-card summary").click()
     with page.expect_response(lambda response: response.url.endswith("/api/experiment/reset")
                               and response.request.method == "POST") as reset:
         page.locator("#experiment-reset").click()
@@ -228,7 +229,8 @@ def check_experiment(page, server, artifacts):
     page.locator("#observer-toggle").uncheck()
     expect(page.locator("#world-grid")).not_to_have_class(re.compile(r"\bevaluator\b"))
 
-    page.locator(".intervention-card summary").click()
+    if page.locator(".intervention-card").get_attribute("open") is None:
+        page.locator(".intervention-card summary").click()
     page.locator("#intervention-x").fill("2")
     page.locator("#intervention-y").fill("2")
     with page.expect_response(lambda response: response.url.endswith("/api/experiment/intervene")

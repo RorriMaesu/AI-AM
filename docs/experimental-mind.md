@@ -38,7 +38,7 @@ The same observation/action interface is intended to support richer simulated en
 
 The world model stores structured beliefs, a bounded recent history, and empirical action-transition statistics. Predictions are scored against actual subsequent observations. The learned statistics can adapt to changed controls in the simulator.
 
-This is online learning of a small model of action consequences. It is **not** neural-network training, an activated adapter, or a newly trained recurrent perception model. Historical adapter files remain unused.
+This is online learning of a small model of action consequences. It is **not** neural-network training, an activated adapter, or a newly trained recurrent perception model. Historical adapter files remain unused. The transition counts are conditioned on the requested action, not the surrounding scene. Blocked movement and free movement therefore contribute to the same action distribution; this is a small baseline rather than a general model of physical dynamics.
 
 The simulator's energy and action budget constrain behavior. These are operational resource values; they are not measurements of pain, pleasure, fear, or any other feeling.
 

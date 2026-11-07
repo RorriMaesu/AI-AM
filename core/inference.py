@@ -86,7 +86,7 @@ def _context_payload(payload, num_ctx, max_chars=None):
                 attention["broadcasts"] = attention["broadcasts"][-4:]
     ledger = prepared.get("action_ledger")
     if isinstance(ledger, list) and len(ledger) > 12:
-        prepared["action_ledger"] = ledger[-12:]
+        prepared["action_ledger"] = ledger[:12]
         prepared["action_ledger_omitted"] = len(ledger) - 12
     budget = min(MAX_PAYLOAD_CHARS, int(num_ctx) * 3)
     if max_chars is not None:
@@ -149,9 +149,10 @@ def _context_payload(payload, num_ctx, max_chars=None):
     # Prefer fewer complete source records to truncated quotations. Fields which
     # identify omitted records are removed from supplied evidence permissions too.
     for keep in (4, 2, 1):
-        for name in ("history", "action_ledger"):
-            if isinstance(prepared.get(name), list):
-                prepared[name] = prepared[name][-keep:]
+        if isinstance(prepared.get("history"), list):
+            prepared["history"] = prepared["history"][-keep:]
+        if isinstance(prepared.get("action_ledger"), list):
+            prepared["action_ledger"] = prepared["action_ledger"][:keep]
         if isinstance(prepared.get("memories"), list):
             prepared["memories"] = prepared["memories"][:keep]
         if isinstance(prepared.get("rules"), dict):
