@@ -134,26 +134,35 @@ class AgentBody {
   }
   visibleBlocks () {
     const bot = this.bot
-    const interesting = b => b && (/log|wood|stone|coal|iron|crafting_table|furnace|dirt|grass_block|sand|planks|leaves|bed|chest|hay_block/.test(b.name) || CROPS.has(b.name))
-    const priority = name => {
-      if (/log|crafting_table|furnace|bed|chest|hay_block/.test(name) || CROPS.has(name)) return 0
-      return /stone|coal|iron|planks/.test(name) ? 1 : 2
+    const resource = block => block && (
+      CROPS.has(block.name) ||
+      /_(log|stem|wood|ore|bed|planks)$/.test(block.name) ||
+      ['crafting_table', 'furnace', 'chest', 'hay_block'].includes(block.name)
+    )
+    const terrain = block => block && (
+      ['dirt', 'grass_block', 'stone', 'cobblestone', 'deepslate', 'sand', 'gravel'].includes(block.name) ||
+      /_leaves$/.test(block.name)
+    )
+    const inView = block => {
+      const p = block.position
+      const center = { x: p.x + .5, y: p.y + .5, z: p.z + .5 }
+      return this.visiblePoint(center, blockId(p)) && (CROPS.has(block.name) || bot.canSeeBlock(block))
     }
-    // Nearby ground can fill the search cap before useful blocks are considered.
-    const resources = bot.findBlocks({ matching: block => interesting(block) && priority(block.name) < 2, maxDistance: 12, count: 96 })
-    const terrain = bot.findBlocks({ matching: block => interesting(block) && priority(block.name) === 2, maxDistance: 12, count: 128 })
-    const all = resources.concat(terrain)
+    // Apply line of sight before the search cap so nearby unseen terrain does
+    // not exhaust the search before it reaches a visible resource.
+    const resources = bot.findBlocks({ matching: resource, useExtraInfo: inView, maxDistance: 12, count: 18 })
+    const surroundings = bot.findBlocks({ matching: terrain, useExtraInfo: inView, maxDistance: 12, count: 18 })
     const result = []
-    for (const p of all) {
-      const b = bot.blockAt(p)
-      if (!b) continue
-      const id = blockId(p); const center = { x: p.x + 0.5, y: p.y + 0.5, z: p.z + 0.5 }
-      if (this.visiblePoint(center, id) && (CROPS.has(b.name) || bot.canSeeBlock(b))) result.push({ id, name: b.name, ...(CROPS.has(b.name) ? { age: b.getProperties?.().age ?? null } : {}), position: pos(p), distance: Math.round(distance(bot.entity.position, p) * 10) / 10 })
+    for (const p of resources.concat(surroundings).slice(0, 18)) {
+      const block = bot.blockAt(p)
+      if (!block) continue
+      const age = CROPS.has(block.name) ? { age: block.getProperties?.().age ?? null } : {}
+      result.push({
+        id: blockId(p), name: block.name, ...age, position: pos(p),
+        distance: Math.round(distance(bot.entity.position, p) * 10) / 10
+      })
     }
-    result.sort((a, b) => {
-      return priority(a.name) - priority(b.name) || a.distance - b.distance || a.id.localeCompare(b.id)
-    })
-    return result.slice(0, 18)
+    return result
   }
   nearbyEntities () {
     return Object.values(this.bot.entities || {}).filter(e => {

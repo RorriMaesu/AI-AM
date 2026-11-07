@@ -22,9 +22,9 @@ function fixture (options = {}) {
   bot.inventory = { items: () => items.filter(i => i.count > 0) }
   bot.registry = { items: { 1: { id: 1, name: 'oak_log' } }, itemsByName: { oak_planks: { id: 2 }, stick: { id: 3 } }, blocksByName: { oak_planks: { id: 2 } } }
   bot.blockAt = p => blocks.get(key(p)) || { name: 'air', type: 0, boundingBox: 'empty', position: new Vec3(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)) }
-  bot.findBlocks = ({ matching, count }) => {
+  bot.findBlocks = ({ matching, useExtraInfo, count }) => {
     const distance = p => Math.hypot(p.x - bot.entity.position.x, p.y - bot.entity.position.y, p.z - bot.entity.position.z)
-    return [...blocks.values()].filter(matching).map(block => block.position)
+    return [...blocks.values()].filter(block => matching(block) && (!useExtraInfo || useExtraInfo(block))).map(block => block.position)
       .sort((left, right) => distance(left) - distance(right)).slice(0, count)
   }
   bot.canSeeBlock = () => true; bot.canDigBlock = () => true
@@ -91,6 +91,7 @@ test('nearby terrain cannot crowd a visible log out of the resource search', () 
   const { body, put } = fixture()
   for (let x = -6; x <= 6; x++) {
     for (let z = -6; z <= 6; z++) {
+      put(x, 61, z, 'bedrock')
       put(x, 62, z, 'dirt')
       put(x, 63, z, 'dirt')
     }
