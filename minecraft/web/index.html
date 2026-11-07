@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Local Minecraft supervision for AI-AM agents.">
+  <title>AI-AM · Minecraft Fishbowl</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="AI-AM Minecraft Fishbowl home"><span class="brand-mark" aria-hidden="true">▦</span><span>AI-AM <span class="brand-sub">/ FISHBOWL</span></span></a>
+      <div class="connection" id="connection" role="status"><span class="status-dot"></span><span id="connection-label">Connecting to supervisor</span></div>
+      <button class="quiet" type="button" id="refresh-button">Refresh</button>
+    </header>
+    <section class="intro">
+      <div><p class="eyebrow">LOCAL MINECRAFT OBSERVATORY</p><h1>A shared world.<br><span>Different points of view.</span></h1><p class="intro-copy">Watch what each agent observes, chooses, and actually does.</p></div>
+      <div class="session-card"><span class="eyebrow">SUPERVISOR</span><strong id="session-status">Waiting for state</strong><span id="session-detail">No telemetry received yet.</span></div>
+    </section>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <div id="unavailable" class="unavailable" role="alert" hidden>The supervisor is unavailable. Displayed values are the last received state.</div>
+    <main class="workspace">
+      <aside class="agent-sidebar panel">
+        <div class="panel-heading"><h2>Agents</h2><span class="count" id="agent-count">0</span></div>
+        <p class="subtle compact-copy">Select a point of view.</p>
+        <div class="agent-list" id="agent-list"><p class="empty">Waiting for configured agents.</p></div>
+        <div class="sidebar-note"><span class="tiny-square" aria-hidden="true"></span><p>Telemetry comes from the local supervisor. Missing data stays unknown.</p></div>
+      </aside>
+      <section class="agent-workspace" aria-label="Selected agent">
+        <section class="viewer-panel panel">
+          <div class="viewer-heading"><div><p class="eyebrow" id="selected-id">NO AGENT SELECTED</p><h2 id="selected-name">Waiting for an agent</h2></div><span class="status-pill" id="agent-status">Unknown</span></div>
+          <div class="viewer-stage" id="viewer-stage">
+            <div class="viewer-empty" id="viewer-empty"><div class="voxel-mark" aria-hidden="true">▦</div><h3 id="viewer-empty-title">Your world will appear here</h3><p id="viewer-empty-copy">Select an agent with a configured local viewer. The dashboard does not generate a substitute world.</p></div>
+          </div>
+          <div class="viewer-footer"><span id="viewer-note">No viewer connected.</span><a id="open-viewer" target="_blank" rel="noopener noreferrer" hidden>Open viewer ↗</a></div>
+          <div class="vitals" id="vitals">
+            <div class="vital"><span>Health</span><strong id="health-value">—</strong><meter id="health-meter" min="0" max="20" value="0" aria-label="Health" hidden></meter></div>
+            <div class="vital"><span>Food</span><strong id="food-value">—</strong><meter id="food-meter" min="0" max="20" value="0" aria-label="Food" hidden></meter></div>
+            <div class="vital position-vital"><span>Position · X / Y / Z</span><strong id="position-value">— / — / —</strong><small id="dimension-value">Dimension unknown</small></div>
+            <div class="vital"><span>Telemetry received</span><strong id="observation-age">—</strong><small id="observation-time">Not yet observed</small></div>
+          </div>
+          <div class="observation-strip"><span id="world-time">Minecraft time unknown</span><span id="body-status">Body status unknown</span><span id="reflex-summary">Recent reflexes not reported</span><span id="inventory-summary">Inventory not reported</span></div>
+        </section>
+        <section class="control-panel panel" aria-labelledby="control-title">
+          <div class="panel-heading"><h2 id="control-title">Give this agent a direction</h2><span class="eyebrow" id="run-state">IDLE</span></div>
+          <form id="run-form">
+            <label class="field" for="goal-input">Goal<textarea id="goal-input" rows="2" maxlength="2000" placeholder="Describe a goal for the selected agent…" required></textarea></label>
+            <div class="run-controls"><label class="steps-field" for="steps-input">Decision limit<input id="steps-input" type="number" min="1" max="30" step="1" value="5" required></label><button class="primary" type="submit" id="run-button" disabled>Run agent <span aria-hidden="true">↗</span></button><button class="danger" type="button" id="stop-button" disabled>Stop agent</button><button class="quiet checkpoint-button" type="button" id="checkpoint-button" disabled>Save checkpoint</button></div>
+            <p class="control-note" id="control-note">Runs require an explicit goal. Stop cancels work and disables body reflexes. Start another explicit Run to continue.</p>
+          </form>
+        </section>
+        <div class="detail-grid">
+          <section class="panel detail-panel"><div class="panel-heading"><h2>Active skill</h2><span class="eyebrow">EXECUTION</span></div><div id="active-skill" class="records"><p class="empty">No skill reported.</p></div></section>
+          <section class="panel detail-panel"><div class="panel-heading"><h2>Shared focus</h2><span class="eyebrow">ATTENTION</span></div><div id="focus-list" class="records"><p class="empty">No focus items reported.</p></div></section>
+        </div>
+        <section class="panel outcomes-panel"><div class="panel-heading"><h2>Observed outcomes</h2><span class="eyebrow">ACTUAL FEEDBACK</span></div><div id="outcomes-list" class="records"><p class="empty">Completed actions and their reported outcomes will appear here.</p></div></section>
+        <section class="panel messages-panel"><div class="panel-heading"><h2>Messages</h2><span class="eyebrow">SELECTED AGENT</span></div><div id="messages-list" class="messages" aria-live="polite"><p class="empty">No messages reported.</p></div><form id="message-form"><label class="sr-only" for="message-input">Message selected agent</label><textarea id="message-input" rows="2" maxlength="2000" placeholder="Send a message to this agent…" required></textarea><button type="submit" class="secondary" id="message-button" disabled>Send <span aria-hidden="true">↗</span></button></form><p class="subtle compact-copy" id="message-note">Sending an operator message pauses this agent’s autonomous run.</p></section>
+      </section>
+    </main>
+    <footer class="page-footer"><span>AI-AM / MINECRAFT FISHBOWL</span><span>Observed behavior, not a measure of subjective experience.</span></footer>
+  </div>
+</body>
+</html>
