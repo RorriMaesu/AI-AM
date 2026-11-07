@@ -127,7 +127,7 @@ $EnvironmentOverrides = @{
     NPM_CONFIG_CACHE=(Join-Path $CacheDir 'npm')
     NPM_CONFIG_USERCONFIG=(Join-Path $DataDir 'npmrc')
     NPM_CONFIG_GLOBALCONFIG=(Join-Path $DataDir 'npm-globalrc')
-    NPM_CONFIG_PREFIX=(Join-Path $DataDir 'npm-global')
+    NPM_CONFIG_PREFIX=$null
     NPM_CONFIG_DEVDIR=(Join-Path $CacheDir 'node-gyp')
     NPM_CONFIG_LOGS_DIR=(Join-Path $CacheDir 'npm-logs'); NPM_CONFIG_GLOBAL='false'
     NODE_OPTIONS=$null; NODE_PATH=$null
@@ -151,7 +151,7 @@ try {
     foreach ($path in @($TempDir, $CacheDir, $DownloadsDir, $RuntimeDir)) { $null = New-Item -ItemType Directory -Path $path }
     [IO.File]::WriteAllText((Join-Path $DataDir 'npmrc'), '')
     [IO.File]::WriteAllText((Join-Path $DataDir 'npm-globalrc'), '')
-    Push-Location -LiteralPath $ProjectDir
+    Push-Location -LiteralPath $MinecraftDir
     $LocationPushed = $true
     $null = [Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem')
 
@@ -171,7 +171,7 @@ try {
     if ((& $NodeExe --version) -ne $NodeVersion -or $LASTEXITCODE -ne 0) { throw 'Unexpected Node runtime version.' }
 
     Write-Host 'Verifying and preparing Temurin Java 21...'
-    $javaAssets = @(Invoke-RestMethod -Uri $JavaMetadataUrl -UseBasicParsing -TimeoutSec 60)
+    $javaAssets = @(Invoke-RestMethod -Uri $JavaMetadataUrl -UseBasicParsing -TimeoutSec 60 | ForEach-Object { $_ })
     if ($javaAssets.Count -ne 1) { throw 'Expected one official Java 21 Windows x64 JDK asset.' }
     $javaPackage = $javaAssets[0].binary.package
     $javaUri = [Uri]$javaPackage.link
@@ -214,7 +214,7 @@ try {
     Run-PreparationCommand $PythonExe (@('-B', '-m', 'pip', 'install', '--disable-pip-version-check', '--only-binary=:all:') + $pythonDependencies)
 
     Write-Host 'Installing Minecraft bridge dependencies with install scripts disabled...'
-    Run-PreparationCommand $NodeExe @($NpmCli, 'install', '--prefix', $MinecraftDir, '--ignore-scripts', '--global=false', '--package-lock=false', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org')
+    Run-PreparationCommand $NodeExe @($NpmCli, 'install', '--ignore-scripts', '--global=false', '--package-lock=false', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org')
     $manifest = [ordered]@{
         schema=1; project_dir=$ProjectDir; preparation_dir=$DataDir
         python_exe=$PythonExe; python_base=$BasePython; node_exe=$NodeExe; java_exe=$JavaExe

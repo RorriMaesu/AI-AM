@@ -42,6 +42,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installed Python dependencies cannot be imported.' }
           Push-Location minecraft
           try {
-              & $setup.node_exe -e "require('mineflayer'); require('prismarine-viewer/lib/worldView')"
+              & $setup.node_exe -e "require('mineflayer'); require('prismarine-viewer/viewer/lib/worldView')"
               if ($LASTEXITCODE -ne 0) { throw 'Installed bridge dependencies cannot be imported.' }
           } finally { Pop-Location }
