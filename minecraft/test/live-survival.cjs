@@ -168,7 +168,8 @@ async function main () {
         yaw: body.bot.entity.yaw, pitch: body.bot.entity.pitch,
         visible: observation.visible.map(block => block.id),
         found: body.bot.findBlocks({ matching: candidate => candidate?.name === 'oak_log', count: 4, maxDistance: 12 }).map(snapshot),
-        observed_block: block?.name, ray_visible: body.visiblePoint(probe.offset(.5, .5, .5), 'block:0,5,-5'),
+        observed_block: block?.name, bounding_box: block?.boundingBox, block_position: block?.position,
+        ray_visible: body.visiblePoint(probe.offset(.5, .5, .5), 'block:0,5,-5'),
         mineflayer_visible: block ? body.bot.canSeeBlock(block) : null,
         min_y: body.bot.game.minY, height: body.bot.game.height
       })

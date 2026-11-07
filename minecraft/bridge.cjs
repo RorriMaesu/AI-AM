@@ -134,7 +134,7 @@ class AgentBody {
   }
   visibleBlocks () {
     const bot = this.bot
-    const interesting = b => b && ((b.boundingBox !== 'empty' && /log|wood|stone|coal|iron|crafting_table|furnace|dirt|grass_block|sand|planks|leaves|bed|chest|hay_block/.test(b.name)) || CROPS.has(b.name))
+    const interesting = b => b && (/log|wood|stone|coal|iron|crafting_table|furnace|dirt|grass_block|sand|planks|leaves|bed|chest|hay_block/.test(b.name) || CROPS.has(b.name))
     const priority = name => {
       if (/log|crafting_table|furnace|bed|chest|hay_block/.test(name) || CROPS.has(name)) return 0
       return /stone|coal|iron|planks/.test(name) ? 1 : 2
