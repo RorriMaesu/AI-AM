@@ -284,7 +284,7 @@ class AgentBody {
     this.records.set(record.id, record); this.active = record
     const timer = setTimeout(() => this.interrupt('action_timeout', record.effect_started ? 'outcome_unknown' : 'failed'), timeout)
     record.promise = Promise.resolve().then(() => this.perform(record, observation)).then(result => {
-      if (record.status === 'running') { record.status = 'succeeded'; record.success = true; record.result = result; record.reason = 'verified' }
+      if (record.status === 'running') { record.status = 'succeeded'; record.success = true; record.result = result; record.reason = result.reason || 'verified' }
     }).catch(err => {
       if (record.status === 'running') {
         record.status = record.effect_started ? 'outcome_unknown' : 'failed'
@@ -422,7 +422,9 @@ class AgentBody {
         await this.step(record, () => bot.toss(item.type, item.metadata, 1))
         await until(() => collected && (inventory(bot)[item.name] || 0) === (record.inventory_before[item.name] || 0) - 1, 4000, signal)
       } finally { bot.removeListener('playerCollect', onCollect); bot.removeListener('entitySpawn', onDrop); bot.removeListener('entityUpdate', onDrop) }
-      return { gave: item.name, recipient: entity.username, count: 1, evidence: 'playerCollect_and_inventory' }
+      return { item: item.name, recipient: entity.username, count: 1,
+        evidence: 'matching_pickup_and_inventory_decrease', exact_drop_owner_confirmed: false,
+        reason: 'Inventory decreased and the recipient picked up a matching item.' }
     }
     if (record.skill === 'flee') {
       const selected = target || observation.nearby.find(e => HOSTILES.has(e.name))?.id
@@ -625,10 +627,12 @@ function createViewer (manager, agentId, port) {
     if (!body.connected || !body.alive || !bot.entity?.position) { socket.emit('observer_status', { ready: false, reason: 'Agent is not spawned; reconnect viewer after starting' }); socket.disconnect(true); return }
     socket.emit('version', bot.version)
     const world = new WorldView(bot.world, 4, bot.entity.position, socket)
-    world.init(bot.entity.position)
+    socket.removeAllListeners('mouseClick')
+    const closeViewer = () => socket.disconnect(true)
+    world.init(bot.entity.position).catch(closeViewer)
     const update = () => {
       socket.emit('position', { pos: bot.entity.position, yaw: bot.entity.yaw, addMesh: true })
-      world.updatePosition(bot.entity.position)
+      world.updatePosition(bot.entity.position).catch(closeViewer)
     }
     bot.on('move', update); world.listenToBot(bot); update()
     const end = () => socket.disconnect(true)

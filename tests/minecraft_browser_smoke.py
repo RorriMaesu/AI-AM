@@ -203,7 +203,8 @@ def main():
                 expect(page.locator("#health-value")).to_have_text("0 / 20")
                 expect(page.locator("#food-value")).to_have_text("—")
                 expect(page.locator("#world-viewer")).to_have_count(0)
-                expect(page.locator("#run-button")).to_be_disabled()
+                expect(page.locator("#run-button")).to_be_enabled()
+                expect(page.locator("#run-button")).to_have_text("Reconnect and run")
                 expect(page.locator("#outcomes-list")).to_contain_text("Fixture death report.")
                 with LOCK:
                     STATE["agents"][1]["observation"]["viewer_url"] = "https://example.com/unsafe"

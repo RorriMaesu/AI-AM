@@ -187,7 +187,8 @@
       knownActionIds.add(item.id); return true;
     }).slice(-30).reverse().forEach(function (item) {
       var outcome = outcomeRecord(item);
-      addRecord(outcomes, outcome.title, outcome.details, ["Actor: " + outcome.actor, outcome.id ? "ID " + outcome.id : "", outcome.time].filter(Boolean).join(" · "), outcome.status);
+      addRecord(outcomes, outcome.title, outcome.details, ["Actor: " + outcome.actor, outcome.id ? "ID " + outcome.id : "", outcome.time,
+        item.prediction && item.prediction.statement ? "Forecast: " + text(item.prediction.statement) : ""].filter(Boolean).join(" · "), outcome.status);
     });
     records(agent && agent.recent_events, 40).filter(function (item) { return /death|died|unknown|error/.test(String(item.kind || item.type || "")); }).reverse().slice(0,8).forEach(function (item) {
       addRecord(outcomes, humanize(item.kind || item.type), text(item.content || item.message || item.text || item), text(item.created_at || item.time), item.kind === "error" ? "error" : "");
@@ -214,10 +215,10 @@
   }
   function renderControls() {
     var agent = selectedAgent, observation = agent && agent.observation || {}, run = agent && agent.run || {};
-    var blocked = !online || !agent || busy.has(agent.id), canRun = !blocked && state.bridge_online !== false && observation.connected === true && observation.alive !== false && !run.active;
+    var blocked = !online || !agent || busy.has(agent.id), canRun = !blocked && state.bridge_online !== false && !run.active;
     $("run-button").disabled = !canRun; $("stop-button").disabled = blocked; $("checkpoint-button").disabled = blocked; $("message-button").disabled = blocked;
     $("goal-input").disabled = blocked; $("steps-input").disabled = blocked; $("message-input").disabled = blocked;
-    $("run-button").textContent = run.active ? "Run active" : "Run agent ↗";
+    $("run-button").textContent = run.active ? "Run active" : observation.connected !== true ? "Reconnect and run" : observation.alive === false ? "Respawn and run" : "Run agent ↗";
     $("run-state").textContent = run.active ? "RUNNING · " + text(run.remaining_steps) + " LEFT" : humanize(run.status || "idle").toUpperCase();
     var maxSteps = state.defaults && state.defaults.max_steps;
     $("steps-input").max = String(Number.isInteger(maxSteps) && maxSteps > 0 ? Math.min(30,maxSteps) : 30);
