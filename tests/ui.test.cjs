@@ -153,3 +153,60 @@ test("message and reflection limits agree with the server before a request is se
   assert.throws(() => ui.validateInput("x".repeat(2001), true), /2000/);
   assert.equal(ui.validateInput("", true), "");
 });
+
+test("agent map never reads hidden evaluator objects or walls", () => {
+  const observation = { width: 3, height: 2, pose: { position: [0, 0], heading: "east" },
+    visible_cells: [{ position: [0, 0], kind: "floor" }, { position: [1, 0], kind: "floor" }],
+    objects: [{ id: "key", name: "Key", position: [1, 0] }], inventory: [], energy: 90 };
+  const view = { observation, evaluator_only: true, world: { width: 3, height: 2,
+    pose: observation.pose, walls: [[2, 1]], objects: { cup: { name: "Secret cup", position: [2, 0] } } } };
+  const agent = ui.normalizeWorld(view, false);
+  assert.equal(agent.cells.length, 6);
+  assert.equal(agent.cells.filter(cell => cell.known).length, 2);
+  assert.equal(JSON.stringify(agent).includes("Secret cup"), false);
+  assert.equal(agent.cells.find(cell => cell.x === 2 && cell.y === 1).kind, "unknown");
+  const observer = ui.normalizeWorld(view, true);
+  assert.equal(observer.cells.filter(cell => cell.known).length, 6);
+  assert.equal(observer.cells.find(cell => cell.x === 2 && cell.y === 1).kind, "wall");
+  assert.equal(observer.cells.find(cell => cell.x === 2 && cell.y === 0).objects[0].name, "Secret cup");
+});
+
+test("evaluator display requires the explicit evaluator marker and safely bounds geometry", () => {
+  const view = { observation: { width: 1000000, height: -1, pose: { position: [999, 0], heading: "<svg>" },
+    visible_cells: [{ position: [0, 0], kind: "script" }, { position: [-1, 0], kind: "wall" }],
+    objects: [{ id: "hidden", position: [3, 3] }] },
+    world: { objects: { secret: { name: "do not render", position: [0, 0] } } } };
+  const result = ui.normalizeWorld(view, true);
+  assert.equal(result.width, 9); assert.equal(result.height, 7);
+  assert.equal(result.position, null); assert.equal(result.heading, "north");
+  assert.equal(result.cells[0].kind, "floor");
+  assert.equal(JSON.stringify(result).includes("do not render"), false);
+  assert.equal(JSON.stringify(result).includes("hidden"), false);
+});
+
+test("world labels remain data and cannot change cell classes", () => {
+  const attack = '<img src=x onerror="alert(1)">';
+  const result = ui.normalizeWorld({ observation: { width: 1, height: 1,
+    visible_cells: [{ position: [0, 0], kind: attack }],
+    objects: [{ id: attack, name: attack, position: [0, 0] }] } }, false);
+  assert.equal(result.cells[0].kind, "floor");
+  assert.equal(result.cells[0].objects[0].name, attack);
+  const node = new FakeNode("span");
+  node.textContent = result.cells[0].objects[0].name;
+  assert.equal(node.children.length, 0);
+  assert.equal(node.textContent, attack);
+});
+
+test("action ledger reports explicit actors and failed or unknown outcomes", () => {
+  assert.deepEqual(ui.actionSummary({ id: "a1", actor: "user", status: "failed",
+    tool: "environment", parameters: { action: "move_forward" }, result: { reason: "Wall ahead." } }),
+    { id: "a1", actor: "user", status: "failed", title: "Move forward", detail: "Wall ahead.", prediction: "" });
+  assert.equal(ui.actionSummary({ tool: "calculator", status: "outcome_unknown" }).status, "outcome_unknown");
+  assert.equal(ui.actionSummary({ tool: "calculator" }).actor, "unknown");
+});
+
+test("record display bounds preserve stable IDs from keyed belief maps", () => {
+  assert.deepEqual(ui.boundedRecords({ key: { position: [2, 3] }, cup: { kind: "remembered" } }, 1),
+    [{ id: "cup", kind: "remembered" }]);
+  assert.deepEqual(ui.boundedRecords([null, "text", { id: "x" }], 5), [{ id: "x" }]);
+});

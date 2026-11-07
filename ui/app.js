@@ -88,7 +88,62 @@
     if (input.length > limit) throw new Error((reflection ? "Reflection topics" : "Messages") + " are limited to " + limit + " characters.");
     return input;
   }
-  var helpers = { tokenizeCode: tokenizeCode, renderText: renderText, formatDuration: formatDuration, messageKind: messageKind, mergeEvents: mergeEvents, facultyStatus: facultyStatus, modelName: modelName, extractEvidence: extractEvidence, snapshotFaculties: snapshotFaculties, eventError: eventError, validateInput: validateInput };
+
+  function boundedRecords(value, maximum) {
+    var rows = Array.isArray(value) ? value : (value && typeof value === "object" ? Object.keys(value).map(function (key) {
+      return typeof value[key] === "object" && value[key] !== null ? Object.assign({ id: key }, value[key]) : { id: key, content: value[key] };
+    }) : []);
+    return rows.filter(function (row) { return row && typeof row === "object"; }).slice(-(maximum || 12));
+  }
+  function normalizeWorld(view, evaluator) {
+    view = view || {};
+    // Never fall back to private world data in the ordinary agent view.
+    var observation = view.observation || {};
+    var source = evaluator && view.evaluator_only === true && view.world ? view.world : observation;
+    var width = Number.isInteger(source.width) && source.width > 0 && source.width <= 32 ? source.width : 9;
+    var height = Number.isInteger(source.height) && source.height > 0 && source.height <= 32 ? source.height : 7;
+    function coordinate(position) {
+      return Array.isArray(position) && position.length === 2 && position.every(Number.isInteger) &&
+        position[0] >= 0 && position[0] < width && position[1] >= 0 && position[1] < height ? position : null;
+    }
+    var visible = new Map(), objects = new Map();
+    if (evaluator && source === view.world) {
+      for (var y = 0; y < height; y++) for (var x = 0; x < width; x++) visible.set(x + "," + y, "floor");
+      (Array.isArray(source.walls) ? source.walls : []).forEach(function (position) { if (coordinate(position)) visible.set(position.join(","), "wall"); });
+    } else {
+      (Array.isArray(observation.visible_cells) ? observation.visible_cells : []).forEach(function (cell) {
+        if (cell && coordinate(cell.position)) visible.set(cell.position.join(","), cell.kind === "wall" ? "wall" : "floor");
+      });
+    }
+    boundedRecords(source.objects, 100).forEach(function (item) {
+      var position = coordinate(item.position);
+      if (!position || !visible.has(position.join(","))) return;
+      var key = position.join(","), at = objects.get(key) || [];
+      at.push({ id: text(item.id).slice(0,128), name: text(item.name || item.id).slice(0,500) }); objects.set(key, at);
+    });
+    var pose = source.pose || {}, agent = coordinate(pose.position);
+    var heading = ["north","east","south","west"].indexOf(pose.heading) >= 0 ? pose.heading : "north";
+    var cells = [];
+    for (var row = 0; row < height; row++) for (var column = 0; column < width; column++) {
+      var key = column + "," + row;
+      cells.push({ x: column, y: row, known: visible.has(key), kind: visible.get(key) || "unknown",
+        objects: objects.get(key) || [], agent: !!agent && agent[0] === column && agent[1] === row });
+    }
+    return { width: width, height: height, cells: cells, position: agent, heading: heading,
+      energy: Number.isFinite(source.energy) ? source.energy : null,
+      inventory: Array.isArray(source.inventory) ? source.inventory.map(text).slice(0,10) : [],
+      tick: source.tick, evaluator: evaluator && source === view.world };
+  }
+  function actionSummary(action) {
+    action = action || {};
+    var parameters = action.parameters || {}, result = action.result || {};
+    return { title: humanize(parameters.action || action.action || action.tool || "Action"),
+      actor: text(action.actor || "unknown"), status: text(action.status || "unknown"),
+      detail: text(result.reason || result.content || action.error || parameters.expression || parameters.target || ""),
+      prediction: text(action.prediction || ""), id: text(action.id || action.action_id || "") };
+  }
+
+  var helpers = { normalizeWorld: normalizeWorld, boundedRecords: boundedRecords, actionSummary: actionSummary,  tokenizeCode: tokenizeCode, renderText: renderText, formatDuration: formatDuration, messageKind: messageKind, mergeEvents: mergeEvents, facultyStatus: facultyStatus, modelName: modelName, extractEvidence: extractEvidence, snapshotFaculties: snapshotFaculties, eventError: eventError, validateInput: validateInput };
   if (typeof module !== "undefined" && module.exports) module.exports = helpers;
   if (typeof document === "undefined") return;
 
@@ -96,6 +151,7 @@
   var state = {}, events = [], eventNodes = new Map(), memories = new Map(), roleResults = {}, models = [], socket = null;
   var reconnectTimer = null, reconnectAttempts = 0, memoryTimer = null, toastTimer = null, searchSequence = 0, stopped = false;
   var refreshFlight = null, isSending = false;
+  var experimentView = null, evaluatorView = null, experimentFlight = null, experimentBusy = false;
   function el(tag, className, content) {
     var node = document.createElement(tag);
     if (className) node.className = className;
@@ -211,7 +267,186 @@
     });
     setRoleAppearance();
     if (Array.isArray(state.recent_events)) renderEvents(state.recent_events);
+    if (state.experiment) { experimentView = state.experiment; renderExperiment(); }
+    else renderExperimentFocus();
   }
+
+  function appendExperimentRecord(container, title, detail, meta, status) {
+    var allowed = ["succeeded", "failed", "outcome_unknown", "attempted", "proposed"];
+    var card = el("div", "experiment-record" + (allowed.indexOf(status) >= 0 ? " " + status : ""));
+    card.appendChild(el("p", "record-title", title));
+    if (detail) card.appendChild(el("p", "record-detail", detail));
+    if (meta) card.appendChild(el("div", "record-meta", meta));
+    container.appendChild(card);
+    return card;
+  }
+  function renderExperimentFocus() {
+    var container = $("experiment-focus"); if (!container) return;
+    clear(container);
+    var workspace = state.workspace || {}, attention = workspace.attention || {};
+    var selected = attention.selected_ids || [];
+    var focus = workspace.focus || attention.focus || boundedRecords(attention.items, 30).filter(function (item) {
+      return selected.indexOf(item.id) >= 0;
+    });
+    boundedRecords(focus, 8).forEach(function (item) {
+      appendExperimentRecord(container, item.content || item.text || item.label || item.id,
+        Array.isArray(item.reasons) ? item.reasons.join(" · ") : (item.reason || ""),
+        [item.kind ? humanize(item.kind) : "", item.score !== undefined ? "Priority " + Number(item.score).toFixed(2) : "",
+          Array.isArray(item.source_event_ids) ? item.source_event_ids.length + " source(s)" : ""].filter(Boolean).join(" · "));
+    });
+    if (!container.childNodes.length) container.appendChild(el("p", "empty-note", "Focus will appear when the agent processes an event."));
+    var missed = boundedRecords(attention.missed || attention.excluded, 3);
+    if (missed.length) container.appendChild(el("p", "experiment-note",
+      "Outside current focus: " + missed.map(function (item) { return item.content || item.text || item.id; }).join("; ")));
+  }
+  function renderExperimentControls() {
+    var run = experimentView && experimentView.run || {}, active = !!run.active;
+    document.querySelectorAll("[data-world-action], #intervention-form button, #reverse-controls, #restore-controls, #experiment-reset").forEach(function (button) {
+      button.disabled = experimentBusy || active || stopped || state.status === "stopped";
+    });
+    var globallyPaused = state.paused === true || state.status === "paused";
+    $("experiment-run").disabled = experimentBusy || active || globallyPaused || stopped || state.status === "stopped";
+    $("experiment-pause").disabled = experimentBusy || !active || stopped || state.status === "stopped";
+  }
+  function renderExperiment() {
+    if (!$("world-grid")) return;
+    renderExperimentFocus();
+    var view = experimentView || {}, observation = view.observation || {}, model = view.model || {};
+    var wantsObserver = $("observer-toggle").checked;
+    var currentEvaluator = evaluatorView && evaluatorView.revision === view.revision ? evaluatorView : null;
+    var world = normalizeWorld(currentEvaluator || view, wantsObserver && !!currentEvaluator);
+    var grid = $("world-grid"); clear(grid);
+    grid.style.gridTemplateColumns = "repeat(" + world.width + ", minmax(0, 1fr))";
+    grid.classList.toggle("evaluator", world.evaluator);
+    grid.setAttribute("aria-label", (world.evaluator ? "Observer map with hidden world revealed" : "Agent observation; striped cells are unobserved") + ", " + world.width + " by " + world.height);
+    var directions = { north: "↑", east: "→", south: "↓", west: "←" };
+    world.cells.forEach(function (cell) {
+      var names = cell.objects.map(function (item) { return item.name; }).join(", ");
+      var label = "(" + cell.x + ", " + cell.y + "): " + (cell.known ? cell.kind : "unobserved");
+      if (names) label += " · " + names;
+      if (cell.agent) label += " · agent facing " + world.heading;
+      var node = el("span", "world-cell " + (cell.known ? "known " + cell.kind : "unknown") +
+        (cell.objects.length ? " object" : "") + (cell.agent ? " agent" : ""));
+      node.dataset.x = String(cell.x); node.dataset.y = String(cell.y); node.dataset.known = String(cell.known);
+      node.title = label; node.setAttribute("aria-label", label);
+      if (cell.agent) node.textContent = directions[world.heading];
+      else if (cell.objects.length) node.textContent = cell.objects[0].id === "key" ? "⚿" : cell.objects[0].id === "cup" ? "◡" : "●";
+      else node.textContent = cell.known ? (cell.kind === "wall" ? "" : "·") : "·";
+      if (cell.agent && cell.objects.length) node.appendChild(el("span", "cell-object", "●"));
+      grid.appendChild(node);
+    });
+    $("world-view-title").textContent = world.evaluator ? "Observer view: complete world" : "What AI-AM can observe";
+    $("observer-notice").hidden = !wantsObserver;
+    $("observer-notice").textContent = world.evaluator ? "Supervisor view. Hidden information is not given to the agent." : "Refreshing supervisor view. The agent observation is shown until it arrives.";
+    $("experiment-revision").textContent = "WORLD " + (view.revision || 0);
+    var pose = observation.pose || {}, position = pose.position;
+    $("world-status").textContent = position ? "At (" + position.join(", ") + "), facing " + text(pose.heading) +
+      " · observation tick " + text(observation.tick) : "Start or reset the simulated world to observe it.";
+    clear($("world-observation"));
+    if (Number.isFinite(observation.energy)) $("world-observation").appendChild(el("span", "", "Energy " + observation.energy));
+    $("world-observation").appendChild(el("span", "", "Carrying: " + ((observation.inventory || []).join(", ") || "nothing")));
+    if (Number.isFinite(observation.steps_remaining)) $("world-observation").appendChild(el("span", "", observation.steps_remaining + " environment steps remaining"));
+    var names = boundedRecords(observation.objects, 20).map(function (item) { return item.name || item.id; });
+    $("world-observation").appendChild(el("span", "", "Visible: " + (names.join(", ") || "no objects")));
+
+    var run = view.run || {};
+    $("experiment-run-status").textContent = run.active ? "RUNNING · " + text(run.remaining_steps) + " LEFT" : (state.paused === true || state.status === "paused" ? "RESUME THE MIND TO RUN" : humanize(run.status || "ready").toUpperCase());
+
+    var beliefs = $("experiment-beliefs"); clear(beliefs);
+    boundedRecords(view.beliefs || model.beliefs, 15).forEach(function (item) {
+      var where = item.position || item.last_observed_position || item.last_position || item.location;
+      var description = item.content || item.description || (where ? "Last location: " + text(where) : "Location unknown");
+      appendExperimentRecord(beliefs, item.name || item.object_id || item.id || "Belief", description,
+        [item.location_status || item.status || item.kind || "", item.confidence !== undefined ? "Confidence " + Number(item.confidence).toFixed(2) : "",
+          item.last_seen_tick !== undefined ? "Observed at tick " + item.last_seen_tick : ""].filter(Boolean).join(" · "));
+    });
+    if (!beliefs.childNodes.length) beliefs.appendChild(el("p", "empty-note", "No object beliefs have been formed yet. Unseen objects are not supplied as facts."));
+
+    var predictions = $("experiment-predictions"); clear(predictions);
+    boundedRecords(view.predictions || model.predictions || model.history, 8).reverse().forEach(function (item) {
+      var expected = item.expected || item.prediction || item.expected_observation || item.predicted_pose || item.predicted_effect || item.description || "";
+      var actual = item.actual || item.outcome || item.observed || item.effect || "";
+      var details = (expected ? "Expected: " + text(expected) : "") + (actual ? "\nObserved: " + text(actual) : "");
+      appendExperimentRecord(predictions, humanize(item.action || item.action_id || "Prediction"), details,
+        [item.status || "", item.error !== undefined ? "Error " + text(item.error) : item.prediction_error !== undefined && item.prediction_error !== null ? "Brier error " + text(item.prediction_error) : "",
+          item.confidence !== undefined ? "Confidence " + Number(item.confidence).toFixed(2) : ""].filter(Boolean).join(" · "));
+    });
+    boundedRecords(model.discrepancies || view.discrepancies, 4).forEach(function (item) {
+      appendExperimentRecord(predictions, "Expectation revised", item.content || item.description || item.reason || text(item), "Observed discrepancy");
+    });
+    if (!predictions.childNodes.length) predictions.appendChild(el("p", "empty-note", "Predictions and observed outcomes will appear after actions."));
+    clear($("experiment-metrics"));
+    var metrics = Object.assign({}, model.calibration || {}, model.metrics || {}, view.metrics || {});
+    Object.keys(metrics).slice(0,8).forEach(function (key) {
+      var value = metrics[key];
+      if (typeof value === "number" && Number.isFinite(value)) $("experiment-metrics").appendChild(el("span", "", humanize(key) + ": " + (Number.isInteger(value) ? value : value.toFixed(3))));
+    });
+
+    var actions = $("experiment-actions"); clear(actions);
+    boundedRecords(view.actions || state.action_ledger, 12).reverse().forEach(function (item) {
+      var summary = actionSummary(item);
+      appendExperimentRecord(actions, summary.title, summary.detail,
+        humanize(summary.actor) + " · " + humanize(summary.status), summary.status);
+    });
+    if (!actions.childNodes.length) actions.appendChild(el("p", "empty-note", "No actions have been recorded."));
+    renderExperimentControls();
+    if (wantsObserver && !currentEvaluator && !experimentFlight) refreshExperiment().catch(function (error) { announce(error.message, true); });
+  }
+  async function refreshExperiment() {
+    if (experimentFlight) return experimentFlight;
+    var observerRequested = $("observer-toggle").checked;
+    experimentFlight = (async function () {
+      experimentView = await api("/api/experiment");
+      evaluatorView = observerRequested ? await api("/api/experiment/evaluator") : null;
+      renderExperiment();
+    })().finally(function () { experimentFlight = null; });
+    return experimentFlight;
+  }
+  async function experimentMutation(endpoint, body, message) {
+    if (experimentBusy) return;
+    experimentBusy = true; renderExperimentControls();
+    try {
+      await api("/api/experiment/" + endpoint, body);
+      await Promise.all([refresh(), refreshExperiment()]);
+      if (message) announce(message);
+    } catch (error) { announce(error.message, true); }
+    finally { experimentBusy = false; renderExperimentControls(); }
+  }
+  function bindExperimentControls() {
+    $("observer-toggle").addEventListener("change", function () {
+      if (!$("observer-toggle").checked) evaluatorView = null;
+      renderExperiment();
+      refreshExperiment().catch(function (error) { announce(error.message, true); });
+    });
+    document.querySelectorAll("[data-world-action]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var confidence = Number($("world-confidence").value);
+        if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) { announce("Confidence must be between 0 and 1.", true); return; }
+        experimentMutation("step", { action: button.dataset.worldAction, target: $("world-target").value,
+          prediction: $("world-prediction").value.trim(), confidence: confidence });
+      });
+    });
+    $("experiment-run-form").addEventListener("submit", function (event) {
+      event.preventDefault();
+      var goal = $("experiment-goal").value.trim(), steps = Number($("experiment-steps").value);
+      if (!goal || goal.length > 2000 || !Number.isInteger(steps) || steps < 1 || steps > 10) {
+        announce("Enter a goal and a step limit between 1 and 10.", true); return;
+      }
+      experimentMutation("run", { goal: goal, steps: steps }, "The bounded experiment is queued.");
+    });
+    $("experiment-pause").addEventListener("click", function () { experimentMutation("pause", {}, "The experiment run is stopping."); });
+    $("experiment-reset").addEventListener("click", function () { experimentMutation("reset", { seed: 0 }, "The simulated world has been reset."); });
+    $("experiment-refresh").addEventListener("click", function () { refreshExperiment().catch(function (error) { announce(error.message, true); }); });
+    $("intervention-form").addEventListener("submit", function (event) {
+      event.preventDefault();
+      var position = [Number($("intervention-x").value), Number($("intervention-y").value)];
+      if (!position.every(Number.isInteger)) { announce("Use whole-number grid coordinates.", true); return; }
+      experimentMutation("intervene", { kind: "move_object", object_id: $("intervention-object").value, position: position }, "The environment changed. The agent must observe it to update its belief.");
+    });
+    $("reverse-controls").addEventListener("click", function () { experimentMutation("intervene", { kind: "alter_controls", mapping: { turn_left: "turn_right", turn_right: "turn_left" } }, "Left and right are now reversed in the simulator."); });
+    $("restore-controls").addEventListener("click", function () { experimentMutation("intervene", { kind: "alter_controls", mapping: { turn_left: "turn_left", turn_right: "turn_right" } }, "Normal turn controls restored."); });
+  }
+
   function sourceButton(id, label, type) {
     var button = el("button", "evidence-link", label || shortId(id)); button.type = "button";
     button.title = id;
@@ -359,6 +594,7 @@
         if (data.state) renderState(data.state);
         refresh().catch(function (error) { announce(error.message, true); }); loadMemories();
       }
+      if (event.type === "experiment_updated" || event.type === "action_updated") refreshExperiment().catch(function () {});
       if (event.type === "memory_updated") { loadMemories(); refresh().catch(function () {}); }
       if (event.type === "error") {
         announce(data.message || data.error || "The runtime could not complete this interaction. You can retry it.", true);
@@ -460,7 +696,8 @@
       if (button.tagName !== "BUTTON") return;
       button.addEventListener("click", function () {
         document.querySelector(".observatory").dataset.panel = button.dataset.panel;
-        document.querySelectorAll(".mobile-tabs button").forEach(function (tab) { tab.setAttribute("aria-pressed", String(tab === button)); });
+        if (button.dataset.panel === "experiment") refreshExperiment().catch(function (error) { announce(error.message, true); });
+        document.querySelectorAll(".mobile-tabs button").forEach(function (tab) { tab.setAttribute("aria-pressed", String(tab.dataset.panel === button.dataset.panel)); });
       });
     });
     $("dismiss-alert").addEventListener("click", function () { $("alert-banner").hidden = true; });
@@ -469,7 +706,8 @@
     document.addEventListener("visibilitychange", function () { if (!document.hidden) { refresh().catch(function () {}); loadMemories(); } });
     window.addEventListener("beforeunload", function () { stopped = true; clearTimeout(reconnectTimer); if (socket) socket.close(); });
   }
-  createFaculties(); bindControls();
+  createFaculties(); bindControls(); bindExperimentControls();
   refresh().catch(function (error) { announce(error.message, true); });
   loadMemories(); connect();
+  refreshExperiment().catch(function () { $("world-status").textContent = "The experiment is unavailable. Refresh after the runtime is ready."; });
 })(typeof globalThis !== "undefined" ? globalThis : this);

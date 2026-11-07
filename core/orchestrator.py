@@ -22,7 +22,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Path, Quer
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketDisconnect
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, StrictInt, Field, field_validator, model_validator
 
 LOG = logging.getLogger("aiam.service")
 ROOT = FilePath(__file__).resolve().parents[1]
@@ -86,6 +86,52 @@ class ControlRequest(RequestModel):
 
 class BackgroundRequest(RequestModel):
     enabled: StrictBool
+
+
+
+class ExperimentResetRequest(RequestModel):
+    seed: StrictInt = Field(default=0, ge=0, le=1_000_000)
+
+
+class ExperimentStepRequest(RequestModel):
+    action: Literal["look", "turn_left", "turn_right", "move_forward", "inspect", "pick_up", "drop", "wait"]
+    target: StrictStr = Field(default="", max_length=32)
+    prediction: StrictStr = Field(default="", max_length=1000)
+    confidence: float = Field(default=0.5, strict=True, ge=0, le=1, allow_inf_nan=False)
+
+
+class ExperimentRunRequest(RequestModel):
+    goal: StrictStr = Field(min_length=1, max_length=2000)
+    steps: StrictInt = Field(default=5, ge=1, le=10)
+
+    @field_validator("goal")
+    @classmethod
+    def validate_goal(cls, value):
+        if not value.strip():
+            raise ValueError("Give this experiment a goal.")
+        return value.strip()
+
+
+class ExperimentInterventionRequest(RequestModel):
+    kind: Literal["move_object", "alter_controls"]
+    object_id: Literal["key", "cup"] | None = None
+    position: list[StrictInt] | None = Field(default=None, min_length=2, max_length=2)
+    mapping: dict[StrictStr, StrictStr] | None = None
+
+    @model_validator(mode="after")
+    def validate_intervention(self):
+        if self.kind == "move_object":
+            if self.object_id is None or self.position is None or self.mapping is not None:
+                raise ValueError("Moving an object requires object_id and position only.")
+            if any(not 0 <= coordinate <= 63 for coordinate in self.position):
+                raise ValueError("Coordinates must be between 0 and 63.")
+        else:
+            if self.object_id is not None or self.position is not None or not self.mapping:
+                raise ValueError("Altering controls requires a nonempty mapping only.")
+            actions = {"turn_left", "turn_right", "move_forward"}
+            if len(self.mapping) > 4 or not set(self.mapping).issubset(actions) or not set(self.mapping.values()).issubset(actions):
+                raise ValueError("Only movement and turn controls may be remapped.")
+        return self
 
 
 class LocalBoundaryMiddleware:
@@ -282,12 +328,13 @@ def create_app(engine=None, config=None, *, start_runtime=True):
 
     @app.get("/api/events")
     async def events(limit: int = Query(50, ge=1, le=200)):
-        return {"events": await asyncio.to_thread(engine.store.list_events, limit)}
+        records = await asyncio.to_thread(engine.store.list_events, limit)
+        return {"events": [record for record in records if not record.get("metadata", {}).get("evaluator_only")]}
 
     @app.get("/api/events/{event_id}")
     async def event(event_id: str = Path(..., min_length=1, max_length=128)):
         result = await asyncio.to_thread(engine.store.get_event, event_id)
-        if result is None:
+        if result is None or result.get("metadata", {}).get("evaluator_only"):
             raise HTTPException(404, "Event not found.")
         return result
 
@@ -349,6 +396,40 @@ def create_app(engine=None, config=None, *, start_runtime=True):
     async def background(data: BackgroundRequest):
         await invoke(lambda: engine.set_background(data.enabled))
         return {"enabled": data.enabled, "state": engine.snapshot()}
+
+
+    @app.get("/api/experiment")
+    async def experiment():
+        async def read():
+            return engine.experiment_snapshot(evaluator=False)
+        return await invoke(read)
+
+    @app.get("/api/experiment/evaluator")
+    async def experiment_evaluator():
+        # Separate supervisor endpoint. This view is never passed to model inputs.
+        async def read():
+            return engine.experiment_snapshot(evaluator=True)
+        return await invoke(read)
+
+    @app.post("/api/experiment/reset", dependencies=[Depends(require_runtime)])
+    async def experiment_reset(data: ExperimentResetRequest):
+        return await invoke(lambda: engine.experiment_reset(seed=data.seed))
+
+    @app.post("/api/experiment/step", dependencies=[Depends(require_runtime)])
+    async def experiment_step(data: ExperimentStepRequest):
+        return await invoke(lambda: engine.experiment_step(**data.model_dump(), actor="user"))
+
+    @app.post("/api/experiment/intervene", dependencies=[Depends(require_runtime)])
+    async def experiment_intervene(data: ExperimentInterventionRequest):
+        return await invoke(lambda: engine.experiment_intervene(data.model_dump(exclude_none=True)))
+
+    @app.post("/api/experiment/run", status_code=202, dependencies=[Depends(require_runtime)])
+    async def experiment_run(data: ExperimentRunRequest):
+        return await invoke(lambda: engine.experiment_run(goal=data.goal, steps=data.steps))
+
+    @app.post("/api/experiment/pause", dependencies=[Depends(require_runtime)])
+    async def experiment_pause(data: RequestModel):
+        return await invoke(engine.experiment_pause)
 
     @app.post("/api/stop")
     async def stop(tasks: BackgroundTasks):

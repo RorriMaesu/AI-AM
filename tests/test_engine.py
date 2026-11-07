@@ -81,11 +81,16 @@ def test_buddhi_receives_original_memory_directly(parts):
 
 def test_restart_preserves_identity_and_events(parts):
     config, store = parts
-    engine, event = run_event(config, store, ScriptBackend())
+    def promise(payload):
+        return decision(commitment_updates=[{"operation": "create", "id": None,
+                        "description": "Preserve corrections.",
+                        "source_event_ids": [payload["current_event"]["id"]]}])
+    engine, event = run_event(config, store, ScriptBackend([promise]),
+                              "Please commit to preserving corrections.")
     restored = MindEngine(config, store, ScriptBackend())
     assert restored.state["state_version"] == engine.state["state_version"]
     assert restored.state["self_model"]["commitments"] == ["Preserve corrections."]
-    assert store.get_event(event["id"])["content"] == "Remember the blue notebook."
+    assert store.get_event(event["id"])["content"] == "Please commit to preserving corrections."
     assert restored.state["status"] == "idle"
 
 def test_correction_supersedes_evidence(parts):

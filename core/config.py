@@ -141,6 +141,11 @@ def load_config(path=None, data_dir=None, demo=False):
         "max_pending": _number(raw, "max_pending", 100, 1, 1000, integer=True),
         "background_enabled": _bool(raw, "background_enabled", False),
         "background_interval": _number(raw, "background_interval", 60, 15, 3600),
+        "workspace_capacity": _number(raw, "workspace_capacity", 6, 2, 16, integer=True),
+        "selective_recurrence": _bool(raw, "selective_recurrence", True),
+        "experiment_enabled": _bool(raw, "experiment_enabled", True),
+        "experiment_max_steps": _number(raw, "experiment_max_steps", 10, 1, 100, integer=True),
+        "experiment_budget": _number(raw, "experiment_budget", 30, 1, 1000, integer=True),
         "backend": backend,
         # Old human-identity instructions are not imported into the new self-model.
         "self_model": _self_model(raw.get("self_model", {})) if version == 2 else copy.deepcopy(DEFAULT_SELF_MODEL),

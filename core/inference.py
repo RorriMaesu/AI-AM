@@ -5,19 +5,92 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from pydantic import ValidationError
 from core.config import validate_api_url, validate_model_name
-from core.contracts import ROLE_PROMPTS, ROLE_SCHEMAS
+from core.contracts import ENVIRONMENT_ACTIONS, ROLE_PROMPTS, ROLE_SCHEMAS
 
 MAX_RESPONSE_BYTES = 128 * 1024
 MAX_PAYLOAD_CHARS = 100_000
 
 
-def _context_payload(payload, num_ctx):
+def _environment_allowed(payload):
+    rules = payload.get("rules") or {}
+    current = payload.get("current_event") or {}
+    return (current.get("kind") == "experiment"
+            and rules.get("environment_enabled") is True
+            and "environment" in rules.get("available_actions", []))
+
+
+def _observed_targets(payload):
+    observation = (payload.get("experiment") or {}).get("observation") or {}
+    visible = {item["id"] for item in observation.get("objects", [])
+               if isinstance(item, dict) and isinstance(item.get("id"), str)}
+    inventory = {item for item in observation.get("inventory", []) if isinstance(item, str)}
+    return visible, inventory
+
+
+def _attention_ids(payload):
+    attention = (payload.get("workspace") or {}).get("attention") or {}
+    return {value for value in attention.get("selected_ids", []) if isinstance(value, str)}
+
+
+def _commitment_ids(payload):
+    records = (payload.get("self_model") or {}).get("commitment_records") or []
+    return {record["id"] for record in records
+            if isinstance(record, dict) and isinstance(record.get("id"), str)}
+
+
+def _action_evidence(payload):
+    evidence, events = set(), set()
+    for record in payload.get("action_ledger") or []:
+        if not isinstance(record, dict):
+            continue
+        if isinstance(record.get("id"), str):
+            evidence.add(record["id"])
+        for key in ("event_id", "result_event_id", "tool_event_id"):
+            if isinstance(record.get(key), str):
+                events.add(record[key])
+        events.update(value for value in record.get("source_event_ids", [])
+                      if isinstance(value, str))
+    rules = payload.get("rules") or {}
+    evidence.update(value for value in rules.get("evidence_ids", []) if isinstance(value, str))
+    events.update(value for value in rules.get("event_ids", []) if isinstance(value, str))
+    return evidence, events
+
+
+def _context_payload(payload, num_ctx, max_chars=None):
     """Bound redundant context while preserving the current event and source IDs."""
     prepared = copy.deepcopy(payload)
+    experiment = prepared.get("experiment")
+    private_fields = {"ground_truth", "evaluator", "world_state", "private_state",
+                      "world", "evaluator_only", "controls", "walls"}
+    def contains_private(value):
+        if isinstance(value, dict):
+            return bool(private_fields.intersection(value)) or any(contains_private(v) for v in value.values())
+        if isinstance(value, list):
+            return any(contains_private(v) for v in value)
+        return False
+    if contains_private(experiment):
+        raise InferenceError("Evaluator world state must never enter a cognitive payload.")
     workspace = prepared.get("workspace")
     if isinstance(workspace, dict):
         workspace.pop("memories", None)  # Already supplied as top-level evidence.
+        attention = workspace.get("attention")
+        if isinstance(attention, dict):
+            selected = set(attention.get("selected_ids") or [])
+            items = attention.get("items")
+            if isinstance(items, list):
+                attention["items"] = [item for item in items
+                                      if isinstance(item, dict) and item.get("id") in selected]
+            if isinstance(attention.get("missed"), list):
+                attention["missed"] = attention["missed"][:4]
+            if isinstance(attention.get("broadcasts"), list):
+                attention["broadcasts"] = attention["broadcasts"][-4:]
+    ledger = prepared.get("action_ledger")
+    if isinstance(ledger, list) and len(ledger) > 12:
+        prepared["action_ledger"] = ledger[-12:]
+        prepared["action_ledger_omitted"] = len(ledger) - 12
     budget = min(MAX_PAYLOAD_CHARS, int(num_ctx) * 3)
+    if max_chars is not None:
+        budget = min(budget, max(0, int(max_chars)))
     serialized = json.dumps(prepared, ensure_ascii=False, allow_nan=False)
     if len(serialized) <= budget:
         return serialized
@@ -38,10 +111,57 @@ def _context_payload(payload, num_ctx):
 
     if isinstance(workspace, dict):
         prepared["workspace"] = compact(workspace)
-    serialized = json.dumps(prepared, ensure_ascii=False, allow_nan=False)
-    if len(serialized) > budget:
-        raise InferenceError("Cognitive context budget exceeded. Shorten the input or increase num_ctx in settings.")
-    return serialized
+    def serialized_payload():
+        return json.dumps(prepared, ensure_ascii=False, allow_nan=False)
+    serialized = serialized_payload()
+    if len(serialized) <= budget:
+        return serialized
+    # Compact redundant historical state first. Current input, current sensory
+    # observation, identifiers, action outcomes, and lifecycle statuses stay intact.
+    if isinstance(prepared.get("focus"), list):
+        prepared["focus"] = [{key: value for key, value in item.items() if key != "score_components"}
+                             if isinstance(item, dict) else item for item in prepared["focus"]]
+    if isinstance(experiment, dict):
+        experiment = prepared["experiment"]
+        if isinstance(experiment.get("history"), list):
+            experiment["history"] = experiment["history"][-1:]
+        if isinstance(experiment.get("beliefs"), list):
+            experiment["beliefs"] = experiment["beliefs"][:8]
+    if isinstance(prepared.get("action_ledger"), list):
+        trimmed = []
+        for record in prepared["action_ledger"]:
+            if not isinstance(record, dict):
+                continue
+            record = copy.deepcopy(record)
+            # Transitions can repeat a complete observation. The authoritative
+            # latest status and tool event remain, and previous entries are retrievable.
+            record.pop("transitions", None)
+            record.pop("history", None)
+            for key in ("result", "prediction"):
+                if isinstance(record.get(key), dict):
+                    record[key] = {name: value for name, value in record[key].items()
+                                   if name not in {"observation", "visible_cells", "beliefs", "history"}}
+            trimmed.append(record)
+        prepared["action_ledger"] = trimmed
+    serialized = serialized_payload()
+    if len(serialized) <= budget:
+        return serialized
+    # Prefer fewer complete source records to truncated quotations. Fields which
+    # identify omitted records are removed from supplied evidence permissions too.
+    for keep in (4, 2, 1):
+        for name in ("history", "action_ledger"):
+            if isinstance(prepared.get(name), list):
+                prepared[name] = prepared[name][-keep:]
+        if isinstance(prepared.get("memories"), list):
+            prepared["memories"] = prepared["memories"][:keep]
+        if isinstance(prepared.get("rules"), dict):
+            rules = prepared["rules"]
+            rules.pop("evidence_ids", None)
+            rules.pop("event_ids", None)
+        serialized = serialized_payload()
+        if len(serialized) <= budget:
+            return serialized
+    raise InferenceError("Cognitive context budget exceeded. Shorten the input or increase num_ctx in settings.")
 
 
 def _episode_schema(role, schema, payload):
@@ -52,6 +172,8 @@ def _episode_schema(role, schema, payload):
     workspace = payload.get("workspace") or {}
     memory_ids = {m["id"] for m in memories if isinstance(m, dict) and isinstance(m.get("id"), str)}
     event_ids = {e["id"] for e in history if isinstance(e, dict) and isinstance(e.get("id"), str)}
+    action_evidence, action_events = _action_evidence(payload)
+    event_ids.update(action_events)
     current = payload.get("current_event") or {}
     if isinstance(current.get("id"), str):
         event_ids.add(current["id"])
@@ -70,11 +192,13 @@ def _episode_schema(role, schema, payload):
 
     if role == "chitta":
         restrict(result["properties"]["selected_memory_ids"], memory_ids)
+    elif role == "ahamkara":
+        restrict(result["properties"]["attended_ids"], _attention_ids(payload))
     elif role == "buddhi":
         # Optional JSON properties let some local models omit action operands
         # even after repair. Require a complete decision at decoding time.
         result["required"] = list(result["properties"])
-        restrict(result["properties"]["evidence_ids"], memory_ids | event_ids)
+        restrict(result["properties"]["evidence_ids"], memory_ids | event_ids | action_evidence)
         proposal = result["$defs"]["MemoryProposal"]["properties"]
         restrict(proposal["source_event_ids"], event_ids)
         if memory_ids:
@@ -83,15 +207,62 @@ def _episode_schema(role, schema, payload):
                     choice["enum"] = sorted(memory_ids)
         else:
             proposal["supersedes"] = {"type": "null", "default": None}
+        actions = ["reply", "retrieve", "reconsider", "calculate"]
+        if _environment_allowed(payload):
+            actions.append("environment")
+            visible, inventory = _observed_targets(payload)
+            result["properties"]["target"]["enum"] = [""] + sorted(visible | inventory)
+            observation = (payload.get("experiment") or {}).get("observation") or {}
+            available = observation.get("actions", ENVIRONMENT_ACTIONS)
+            result["properties"]["environment_action"]["enum"] = [""] + [
+                action for action in ENVIRONMENT_ACTIONS if action in available]
+        result["properties"]["action"]["enum"] = actions
+        if not _environment_allowed(payload):
+            for name in ("environment_action", "target", "prediction"):
+                result["properties"][name]["enum"] = [""]
+        commitment = result["$defs"]["CommitmentProposal"]["properties"]
+        restrict(commitment["source_event_ids"], event_ids)
+        existing = _commitment_ids(payload)
+        if existing:
+            for choice in commitment["id"]["anyOf"]:
+                if choice.get("type") == "string":
+                    choice["enum"] = sorted(existing)
+        else:
+            commitment["id"] = {"type": "null", "default": None}
+            commitment["operation"]["enum"] = ["create"]
     return result, memory_ids, event_ids
 
 
 def _validate_episode_ids(role, result, memory_ids, event_ids, payload):
     if role == "chitta" and not set(result.selected_memory_ids).issubset(memory_ids):
         raise ValueError("selected_memory_ids must use only the supplied retrieved memory IDs")
+    if role == "ahamkara" and not set(result.attended_ids).issubset(_attention_ids(payload)):
+        raise ValueError("attended_ids must name selected items in the supplied attention workspace")
     if role == "buddhi":
-        if not set(result.evidence_ids).issubset(memory_ids | event_ids):
+        action_evidence, _ = _action_evidence(payload)
+        if result.action == "environment" and not _environment_allowed(payload):
+            raise ValueError("Environment actions are available only in an explicitly authorized experiment event")
+        if result.action == "environment":
+            visible, inventory = _observed_targets(payload)
+            if result.environment_action in ("inspect", "pick_up") and result.target not in visible:
+                raise ValueError("Environment target must be a currently observed object ID; look for it first")
+            if result.environment_action == "drop" and result.target not in inventory:
+                raise ValueError("Only an object in the supplied inventory can be dropped")
+            observation = (payload.get("experiment") or {}).get("observation") or {}
+            if result.environment_action not in observation.get("actions", ENVIRONMENT_ACTIONS):
+                raise ValueError("Environment action is not available in the current observation")
+        if not set(result.evidence_ids).issubset(memory_ids | event_ids | action_evidence):
             raise ValueError("evidence_ids must use only the supplied event or memory IDs")
+        for change in result.commitment_updates:
+            current = payload.get("current_event") or {}
+            if change.operation in ("create", "update") and (
+                current.get("kind") != "user" or current.get("id") not in change.source_event_ids
+            ):
+                raise ValueError("Creating or updating a commitment requires the current user event as evidence")
+            if not set(change.source_event_ids).issubset(event_ids):
+                raise ValueError("commitment_updates.source_event_ids must cite supplied source events")
+            if change.operation != "create" and change.id not in _commitment_ids(payload):
+                raise ValueError("commitment_updates must use an existing stable commitment ID")
         for proposal in result.memory_updates:
             if not proposal.source_event_ids or not set(proposal.source_event_ids).issubset(event_ids):
                 raise ValueError("memory_updates.source_event_ids must cite supplied source events")
@@ -154,10 +325,20 @@ class OllamaBackend:
         schema = ROLE_SCHEMAS[role]
         model = validate_model_name(self.config["roles"][role]["model"])
         serialized = _context_payload(payload, self.config.get("num_ctx", 8192))
-        output_schema, memory_ids, event_ids = _episode_schema(role, schema.model_json_schema(), payload)
+        supplied = json.loads(serialized)
+        output_schema, memory_ids, event_ids = _episode_schema(role, schema.model_json_schema(), supplied)
         # The format parameter constrains decoding. The prompt also needs to
         # communicate the fields and their meaning to the model.
         system_prompt = ROLE_PROMPTS[role] + "\nOutput JSON schema:\n" + json.dumps(output_schema, separators=(",", ":"))
+        total_budget = min(MAX_PAYLOAD_CHARS, max(0, (
+            self.config.get("num_ctx", 8192) - self.config.get("max_output_tokens", 1600) - 256
+        ) * 3))
+        if len(system_prompt) + len(serialized) > total_budget:
+            serialized = _context_payload(supplied, self.config.get("num_ctx", 8192),
+                                          max_chars=total_budget - len(system_prompt))
+            supplied = json.loads(serialized)
+            output_schema, memory_ids, event_ids = _episode_schema(role, schema.model_json_schema(), supplied)
+            system_prompt = ROLE_PROMPTS[role] + "\nOutput JSON schema:\n" + json.dumps(output_schema, separators=(",", ":"))
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": serialized},
@@ -198,7 +379,7 @@ class OllamaBackend:
             try:
                 parsed = json.loads(content)
                 result = schema.model_validate(parsed)
-                _validate_episode_ids(role, result, memory_ids, event_ids, payload)
+                _validate_episode_ids(role, result, memory_ids, event_ids, supplied)
                 return result.model_dump(), token_count
             except (ValueError, TypeError) as exc:
                 if attempt:
@@ -266,14 +447,19 @@ class DemoBackend:
             memories = []
         relevant = [memory for memory in memories if isinstance(memory, dict)][:6]
         memory_ids = [m["id"] for m in relevant if isinstance(m.get("id"), str)]
+        experiment = payload.get("experiment") or {}
+        observation = experiment.get("observation") or {}
+        ledger = payload.get("action_ledger") or []
         if role == "manas":
             result = {
                 "observations": [f"The {event.get('kind', 'user')} event says: {content}"],
                 "interpretations": ["This demonstration treats the supplied text as a statement to remember."],
                 "uncertainties": ["No language model is connected in demonstration mode."],
                 "retrieval_query": content,
-                "salience": 0.5,
+                "salience": 0.8 if experiment.get("discrepancies") else 0.5,
             }
+            if observation:
+                result["observations"].append("Simulation observation: " + json.dumps(observation, separators=(",", ":"))[:1000])
         elif role == "chitta":
             result = {
                 "selected_memory_ids": memory_ids,
@@ -287,7 +473,14 @@ class DemoBackend:
                 "agency": "The incoming statement belongs to its source; the system owns this generated response.",
                 "capability_limits": ["Responses are scripted demonstrations, not local LLM reasoning."],
                 "commitments": [],
+                "attended_ids": sorted(_attention_ids(payload))[:12],
+                "overlooked": ["Objects outside the current view may have changed."] if observation else [],
+                "uncertainty_to_check": "Inspect a changed or uncertain visible object." if experiment.get("discrepancies") else "",
             }
+            if ledger:
+                result["agency"] = "Recorded actions: " + "; ".join(
+                    f"{record.get('actor', 'unknown')}: {record.get('tool', 'tool')} {record.get('status', 'unknown')}"
+                    for record in ledger[-6:] if isinstance(record, dict))[:1600]
         elif role == "buddhi":
             recalled = "\n".join(f"- {str(m.get('content', ''))[:300]}" for m in relevant)
             reply = "Demonstration mode: the four functions processed your message and preserved its source."
@@ -313,6 +506,30 @@ class DemoBackend:
                 "memory_updates": proposal,
                 "goal_updates": [],
             }
+            if _environment_allowed(payload):
+                visible = observation.get("objects", [])
+                inventory = observation.get("inventory", [])
+                goal = str(experiment.get("goal") or content).lower()
+                target_name = "cup" if "cup" in goal else "key"
+                target = next((item for item in visible if item.get("id") == target_name), None)
+                tool_results = (payload.get("workspace") or {}).get("tool_results") or []
+                result.update(memory_updates=[], commitment_updates=[])
+                if target_name in inventory:
+                    result["reply"] = f"Demonstration mode: the observed inventory contains {target_name}; the simulated task is complete."
+                elif tool_results:
+                    result["reply"] = "Demonstration mode: the simulated action returned an observation. The action ledger records its outcome."
+                else:
+                    pose = (observation.get("pose") or {}).get("position") or []
+                    position = (target or {}).get("position") or []
+                    reachable = (len(pose) == len(position) == 2
+                                 and sum(abs(a-b) for a, b in zip(pose, position)) <= 1)
+                    action = "pick_up" if target and reachable else "move_forward" if target else "turn_left"
+                    result.update(action="environment", reply="", environment_action=action,
+                                  target=target_name if action == "pick_up" else "",
+                                  prediction=(f"The inventory will contain {target_name}." if action == "pick_up"
+                                              else "The next observation will reflect the attempted simulated movement."),
+                                  prediction_confidence=0.8, uncertainty=0.2,
+                                  rationale="A scripted action chosen only from the limited observation.")
         else:
             raise ValueError("Unknown cognitive role.")
         parsed = ROLE_SCHEMAS[role].model_validate(result).model_dump()

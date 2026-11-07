@@ -19,6 +19,7 @@
     </a>
     <div class="header-actions">
       <span class="connection" id="connection-status" role="status"><span class="status-dot"></span><span id="connection-label">Connecting</span></span>
+      <button class="button button-quiet" id="experiment-button" data-panel="experiment" type="button">World <span aria-hidden="true">↗</span></button>
       <button class="button button-quiet" id="models-button" type="button">Models <span aria-hidden="true">↗</span></button>
       <button class="button button-outline" id="pause-button" type="button" disabled>Pause</button>
     </div>
@@ -31,6 +32,7 @@
     <button type="button" data-panel="dialogue" aria-pressed="true">Dialogue</button>
     <button type="button" data-panel="identity" aria-pressed="false">Memory</button>
     <button type="button" data-panel="workspace" aria-pressed="false">Faculties</button>
+    <button type="button" data-panel="experiment" aria-pressed="false">World</button>
   </nav>
 
   <main class="observatory" data-panel="dialogue">
@@ -98,6 +100,68 @@
       </section>
       <div class="metrics" aria-label="Runtime metrics"><div><span class="metric-number" id="metric-tokens">0</span><span>tokens used</span></div><div><span class="metric-number" id="metric-latency">—</span><span>last cycle</span></div><div><span class="metric-number" id="metric-errors">0</span><span>errors</span></div></div>
     </aside>
+
+    <section class="experiment-panel" aria-labelledby="experiment-title">
+      <div class="experiment-heading">
+        <div><div class="section-kicker">04 / EMBODIED EXPERIMENT</div><h2 id="experiment-title">A point of view.</h2><p>A small world, limited observations, and consequences to learn from.</p></div>
+        <button class="button button-outline" type="button" data-panel="dialogue">Return to dialogue ↗</button>
+      </div>
+      <div class="experiment-layout">
+        <div class="experiment-world-column">
+          <section class="experiment-card world-card">
+            <div class="section-heading compact"><h3 id="world-view-title">What AI-AM can observe</h3><span class="small-label" id="experiment-revision">WORLD 0</span></div>
+            <label class="observer-toggle"><input type="checkbox" id="observer-toggle"> Observer view — reveal the hidden world</label>
+            <p class="observer-notice" id="observer-notice" hidden>Supervisor view. Hidden information is not given to the agent.</p>
+            <div id="world-grid" class="world-grid" role="img" aria-label="Waiting for the simulated environment"></div>
+            <div class="world-legend"><span><i class="legend-agent"></i>Agent</span><span><i class="legend-visible"></i>Observed</span><span><i class="legend-unknown"></i>Unobserved</span><span><i class="legend-wall"></i>Wall</span></div>
+            <div id="world-status" class="world-status" role="status">Loading the experiment…</div>
+            <div id="world-observation" class="world-observation"></div>
+            <div class="world-controls" aria-label="Manual world actions">
+              <button type="button" class="button button-outline" data-world-action="turn_left">↶ Turn left</button>
+              <button type="button" class="button button-primary" data-world-action="move_forward">↑ Move</button>
+              <button type="button" class="button button-outline" data-world-action="turn_right">Turn right ↷</button>
+              <button type="button" class="button button-outline" data-world-action="look">Look</button>
+              <button type="button" class="button button-outline" data-world-action="inspect">Inspect</button>
+              <button type="button" class="button button-outline" data-world-action="pick_up">Pick up</button>
+              <button type="button" class="button button-outline" data-world-action="drop">Drop</button>
+              <button type="button" class="button button-outline" data-world-action="wait">Wait</button>
+            </div>
+            <div class="experiment-inline-fields">
+              <label>Target<select id="world-target"><option value="">Automatic</option><option value="key">Key</option><option value="cup">Cup</option></select></label>
+              <label>Confidence<input id="world-confidence" type="number" min="0" max="1" step="0.1" value="0.5"></label>
+            </div>
+            <label class="experiment-field">Prediction before your next action<input id="world-prediction" type="text" maxlength="1000" placeholder="Optional: what do you expect to happen?"></label>
+            <p class="experiment-note">Manual controls are recorded as user-directed actions. This world is simulated; it does not control your computer or a robot.</p>
+          </section>
+          <section class="experiment-card">
+            <div class="section-heading compact"><h3>Give the agent a goal</h3><span class="small-label" id="experiment-run-status">WAITING</span></div>
+            <form id="experiment-run-form">
+              <label class="sr-only" for="experiment-goal">Experiment goal</label>
+              <textarea id="experiment-goal" rows="2" maxlength="2000" required>Find and pick up the key. Check what you can actually observe.</textarea>
+              <div class="experiment-run-actions"><label>Step limit<input id="experiment-steps" type="number" min="1" max="10" value="5" required></label><button class="button button-primary" id="experiment-run" type="submit">Begin experiment ↗</button><button class="button button-outline" id="experiment-pause" type="button">Stop run</button></div>
+            </form>
+            <p class="experiment-note">Each run has a step limit. Live models deliberate when needed; demo decisions are scripted.</p>
+          </section>
+          <details class="experiment-card intervention-card">
+            <summary>Change the world <span aria-hidden="true">+</span></summary>
+            <p class="experiment-note">Move an object while it is out of view, then observe how the agent revises its belief. Interventions are recorded separately from the agent's actions.</p>
+            <form id="intervention-form">
+              <div class="experiment-inline-fields intervention-fields"><label>Object<select id="intervention-object"><option value="key">Key</option><option value="cup">Cup</option></select></label><label>X<input id="intervention-x" type="number" min="0" max="8" value="2" required></label><label>Y<input id="intervention-y" type="number" min="0" max="6" value="2" required></label></div>
+              <button class="button button-outline" type="submit">Move object</button>
+            </form>
+            <div class="intervention-buttons"><button class="button button-outline" id="reverse-controls" type="button">Reverse left / right</button><button class="button button-outline" id="restore-controls" type="button">Restore left / right</button></div>
+            <div class="experiment-reset"><button class="text-button" id="experiment-reset" type="button">Reset experiment world</button><button class="text-button" id="experiment-refresh" type="button">Refresh view</button></div>
+          </details>
+        </div>
+        <div class="experiment-mind-column">
+          <section class="experiment-card"><div class="section-heading compact"><h3>Shared attention</h3><span class="small-label">ACTIVE FOCUS</span></div><div id="experiment-focus" class="experiment-records"><p class="empty-note">Focus will appear when the agent processes an event.</p></div></section>
+          <section class="experiment-card"><div class="section-heading compact"><h3>What it currently believes</h3><span class="small-label">SOURCES MATTER</span></div><div id="experiment-beliefs" class="experiment-records"></div></section>
+          <section class="experiment-card"><div class="section-heading compact"><h3>Prediction → outcome</h3><span class="small-label">LEARNING</span></div><div id="experiment-predictions" class="experiment-records"></div><div id="experiment-metrics" class="experiment-metrics"></div></section>
+          <section class="experiment-card"><div class="section-heading compact"><h3>Who did what</h3><span class="small-label">ACTION LEDGER</span></div><div id="experiment-actions" class="experiment-records"></div></section>
+        </div>
+      </div>
+      <p class="experiment-disclaimer">This experiment measures attention, prediction, memory, and agency. It does not establish subjective consciousness.</p>
+    </section>
   </main>
 
   <dialog class="modal" id="detail-dialog" aria-labelledby="detail-title"><div class="modal-heading"><h2 id="detail-title">Experience</h2><button class="icon-button modal-close" type="button" aria-label="Close details">×</button></div><div id="detail-body" class="modal-body"></div></dialog>

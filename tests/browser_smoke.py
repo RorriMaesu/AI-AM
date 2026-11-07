@@ -196,6 +196,81 @@ def check_memory(page, event):
     page.keyboard.press("Escape")
 
 
+
+def check_experiment(page, server, artifacts):
+    evaluator_requests = []
+    page.on("request", lambda request: evaluator_requests.append(request.url)
+            if request.url.endswith("/api/experiment/evaluator") else None)
+    page.locator("#experiment-button").click()
+    expect(page.locator("#world-grid .world-cell")).to_have_count(63)
+    expect(page.locator("#observer-toggle")).not_to_be_checked()
+    assert not evaluator_requests, "Hidden evaluator truth must not be fetched by ordinary viewing"
+    with page.expect_response(lambda response: response.url.endswith("/api/experiment/reset")
+                              and response.request.method == "POST") as reset:
+        page.locator("#experiment-reset").click()
+    assert reset.value.ok, reset.value.text()
+    public = get_json(page, server, "/api/experiment")
+    assert "world" not in public and not public.get("evaluator_only")
+    assert public["observation"]["pose"]["position"] == [2, 3]
+    assert "cup" not in [item["id"] for item in public["observation"]["objects"]]
+    assert page.locator('#world-grid .world-cell[data-known="false"]').count() > 0
+    assert "cup" not in " ".join(page.locator("#world-grid .world-cell").evaluate_all(
+        "(cells) => cells.map(cell => cell.getAttribute('aria-label'))")).lower()
+    assert_no_overflow(page)
+    page.screenshot(path=str(artifacts / "world-agent-view.png"), full_page=True)
+
+    page.locator("#observer-toggle").check()
+    expect(page.locator("#world-grid")).to_have_class(re.compile(r"\bevaluator\b"))
+    assert evaluator_requests
+    assert page.locator('#world-grid .world-cell[data-known="false"]').count() == 0
+    expect(page.locator("#observer-notice")).to_be_visible()
+    page.screenshot(path=str(artifacts / "world-observer-view.png"), full_page=True)
+    page.locator("#observer-toggle").uncheck()
+    expect(page.locator("#world-grid")).not_to_have_class(re.compile(r"\bevaluator\b"))
+
+    page.locator(".intervention-card summary").click()
+    page.locator("#intervention-x").fill("2")
+    page.locator("#intervention-y").fill("2")
+    with page.expect_response(lambda response: response.url.endswith("/api/experiment/intervene")
+                              and response.request.method == "POST") as changed:
+        page.locator("#intervention-form button").click()
+    assert changed.value.ok, changed.value.text()
+    after_change = get_json(page, server, "/api/experiment")
+    assert after_change["observation"] == public["observation"], "An unseen intervention cannot rewrite the agent's observation"
+
+    with page.expect_response(lambda response: response.url.endswith("/api/experiment/step")
+                              and response.request.method == "POST") as stepped:
+        page.locator('[data-world-action="turn_left"]').click()
+    assert stepped.value.ok, stepped.value.text()
+    page.wait_for_function("""async () => {
+        const view = await (await fetch('/api/experiment')).json();
+        return view.observation.pose.heading === 'north';
+    }""")
+    turned = get_json(page, server, "/api/experiment")
+    assert turned["observation"]["pose"]["heading"] == "north"
+    key = next(item for item in turned["observation"]["objects"] if item["id"] == "key")
+    assert key["position"] == [2, 2]
+    expect(page.locator("#experiment-actions")).to_contain_text("User")
+    expect(page.locator("#world-status")).to_contain_text("north")
+    page.screenshot(path=str(artifacts / "world-revised-belief.png"), full_page=True)
+
+    page.locator("#experiment-goal").fill("Inspect what is currently visible.")
+    page.locator("#experiment-steps").fill("1")
+    with page.expect_response(lambda response: response.url.endswith("/api/experiment/run")
+                              and response.request.method == "POST") as queued:
+        page.locator("#experiment-run").click()
+    assert queued.value.status == 202, queued.value.text()
+    submitted = queued.value.request.post_data_json
+    assert set(submitted) == {"goal", "steps"}, "Evaluator state must never be sent to model-run requests"
+    page.wait_for_function("""async () => {
+        const view = await (await fetch('/api/experiment')).json();
+        return view.run && !view.run.active;
+    }""", timeout=30000)
+    expect(page.locator("#experiment-run")).to_be_enabled()
+    return ["partial-observation world", "explicit evaluator view", "hidden intervention preserves prior observation",
+            "manual action ledger and revised observation", "bounded demo experiment run"]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts", required=True, type=Path,
@@ -306,6 +381,13 @@ def main():
                     mobile.locator('.mobile-tabs button[data-panel="dialogue"]').click()
                     assert_layout(mobile)
                     checks.append("desktop and mobile layout with visible composer")
+
+                    checks.extend(check_experiment(desktop, server, artifacts))
+                    mobile.locator('.mobile-tabs button[data-panel="experiment"]').click()
+                    expect(mobile.locator("#world-grid")).to_be_visible()
+                    assert_no_overflow(mobile)
+                    mobile.screenshot(path=str(artifacts / "mobile-world.png"), full_page=True)
+                    checks.append("mobile world controls and layout")
 
                     assert not errors, f"Browser JavaScript errors: {errors}"
                     assert not server_errors, f"Server errors: {server_errors}"

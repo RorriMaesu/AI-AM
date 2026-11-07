@@ -36,5 +36,10 @@
       "arithmetic"
     ],
     "commitments": []
-  }
+  },
+  "workspace_capacity": 6,
+  "selective_recurrence": true,
+  "experiment_enabled": true,
+  "experiment_max_steps": 10,
+  "experiment_budget": 30
 }

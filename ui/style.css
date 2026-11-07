@@ -1656,3 +1656,73 @@ body {
   overflow: auto;
   white-space: pre
 }
+
+/* The world is a separate workspace so conversation keeps its full usable height. */
+.experiment-panel { display:none; min-width:0; min-height:0; overflow:auto; padding:30px 38px 45px; }
+.observatory[data-panel="experiment"] { display:block; }
+.observatory[data-panel="experiment"] > .identity-panel,
+.observatory[data-panel="experiment"] > .dialogue-panel,
+.observatory[data-panel="experiment"] > .workspace-panel { display:none; }
+.observatory[data-panel="experiment"] > .experiment-panel { display:block; height:100%; }
+.experiment-heading { display:flex; justify-content:space-between; align-items:center; gap:24px; max-width:1250px; margin:0 auto 25px; }
+.experiment-heading h2 { font:normal 37px/1.15 var(--serif); margin:10px 0; }
+.experiment-heading p { color:var(--muted); margin:0; font-size:12px; }
+.experiment-layout { display:grid; grid-template-columns:minmax(300px,1.1fr) minmax(300px,1fr); gap:22px; max-width:1250px; margin:auto; align-items:start; }
+.experiment-world-column,.experiment-mind-column { min-width:0; display:grid; gap:18px; }
+.experiment-card { min-width:0; border:1px solid var(--line); border-radius:var(--radius); padding:22px; background:var(--ink-soft); }
+.experiment-card h3 { margin:0; font-size:14px; font-weight:500; }
+.world-card { background:linear-gradient(145deg,#182e32,#15252c); }
+.observer-toggle { display:flex; align-items:center; gap:9px; font-size:11px; color:var(--muted); margin:17px 0; cursor:pointer; }
+.observer-toggle input { accent-color:var(--copper); }
+.observer-notice { border-left:2px solid var(--copper); color:var(--copper); padding:3px 10px; font-size:11px; }
+.world-grid { display:grid; grid-template-columns:repeat(9,minmax(0,1fr)); gap:4px; width:100%; max-width:540px; margin:18px auto; padding:9px; border:1px solid #35504e; border-radius:12px; background:#0b171e; }
+.world-cell { aspect-ratio:1; min-width:0; display:flex; align-items:center; justify-content:center; position:relative; color:#9db1b0; border:1px solid transparent; border-radius:4px; font-size:17px; background:#102028; }
+.world-cell.known { background:#29423f; border-color:#35534d; }
+.world-cell.wall { background:#4c5b60; border-color:#647278; }
+.world-cell.unknown { background:repeating-linear-gradient(135deg,#101e25,#101e25 3px,#13232b 3px,#13232b 4px); color:#49616a; font-size:10px; }
+.world-cell.object { color:#f2c296; }
+.world-cell.agent { background:var(--teal); color:#15332a; border-color:#c7f4df; font-size:24px; box-shadow:0 0 17px #91d7c022; z-index:1; }
+.world-cell .cell-object { position:absolute; right:2px; bottom:0; font-size:10px; }
+.world-grid.evaluator { border-color:var(--copper); }
+.world-legend { display:flex; flex-wrap:wrap; gap:14px; justify-content:center; font-size:9px; color:var(--muted); }
+.world-legend span { display:flex; gap:5px; align-items:center; }
+.world-legend i { display:inline-block; width:8px; height:8px; border-radius:2px; }
+.legend-agent { background:var(--teal); }.legend-visible { background:#35534d; }.legend-wall { background:#647278; }.legend-unknown { background:#13232b; border:1px solid #49616a; }
+.world-status { font-size:12px; color:var(--teal); margin:20px 0 10px; overflow-wrap:anywhere; }
+.world-observation { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:20px; }
+.world-observation span { font-size:10px; padding:4px 8px; border:1px solid var(--line); border-radius:5px; color:var(--muted); overflow-wrap:anywhere; }
+.world-controls { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
+.world-controls .button { min-height:38px; padding:8px 5px; }
+.experiment-inline-fields { display:grid; grid-template-columns:2fr 1fr; gap:12px; margin:18px 0 12px; }
+.experiment-card label.experiment-field,.experiment-inline-fields label,.experiment-run-actions label { color:var(--muted); font-size:10px; display:block; min-width:0; }
+.experiment-card input:not([type="checkbox"]),.experiment-card select,.experiment-card textarea { display:block; width:100%; min-width:0; padding:9px 10px; margin-top:6px; background:#102128; border:1px solid #35504e; border-radius:6px; color:var(--text); font-size:12px; }
+.experiment-card textarea { resize:vertical; min-height:70px; line-height:1.6; margin-top:17px; }
+.experiment-note { font-size:10px; color:var(--muted); line-height:1.7; margin:14px 0 0; }
+.experiment-run-actions { display:flex; align-items:flex-end; gap:9px; flex-wrap:wrap; margin:13px 0; }
+.experiment-run-actions label { width:65px; }
+.experiment-run-actions .button { min-height:38px; }
+.intervention-card summary { cursor:pointer; font-size:13px; display:flex; justify-content:space-between; }
+.intervention-fields { grid-template-columns:2fr 1fr 1fr; }
+.intervention-buttons,.experiment-reset { display:flex; flex-wrap:wrap; gap:10px; margin-top:17px; }
+.experiment-reset { border-top:1px solid var(--line); padding-top:15px; justify-content:space-between; }
+.experiment-records { display:grid; gap:10px; margin-top:16px; max-height:310px; overflow:auto; }
+.experiment-record { border-left:2px solid #44685d; padding:3px 0 4px 12px; min-width:0; overflow-wrap:anywhere; }
+.experiment-record .record-title { color:var(--text); font-size:12px; margin:0 0 4px; }
+.experiment-record .record-detail { color:var(--muted); font-size:10px; margin:3px 0; white-space:pre-wrap; }
+.experiment-record .record-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; font-size:9px; color:var(--copper); }
+.experiment-record.failed,.experiment-record.outcome_unknown { border-color:var(--danger); }
+.experiment-record.succeeded { border-color:var(--teal); }
+.experiment-metrics { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.experiment-metrics span { font-size:10px; color:var(--muted); border:1px solid var(--line); border-radius:5px; padding:5px 8px; }
+.experiment-disclaimer { max-width:1250px; margin:24px auto 0; font-size:10px; color:var(--muted); }
+@media(max-width:960px) { .mobile-tabs { gap:10px; }.experiment-panel { padding:25px; }.experiment-card { padding:18px; } }
+@media(max-width:700px) {
+  .experiment-layout { grid-template-columns:minmax(0,1fr); }
+  .experiment-heading { align-items:flex-start; gap:12px; }
+  .experiment-heading h2 { font-size:30px; }
+  .experiment-heading > .button { font-size:10px; max-width:110px; }
+  .experiment-panel { padding:21px 16px 35px; }
+  .world-grid { max-width:460px; gap:3px; padding:6px; }
+  .world-cell { font-size:14px; }.world-cell.agent { font-size:20px; }
+}
+@media(max-width:390px) { .brand-mark { width:25px; }.header-actions .button { padding:7px 6px; }.header-actions { gap:2px; }.masthead { padding:0 11px; }.brand { gap:6px; } }

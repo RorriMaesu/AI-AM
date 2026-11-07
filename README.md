@@ -12,6 +12,11 @@ can request another retrieval or reconsideration before responding.
 The dashboard shows what each function contributed and which remembered
 events supported a decision.
 
+The experimental mind extension adds persistent attention, an action ledger,
+and a small simulated world with partial observations and learned action
+predictions. Autonomous world exploration begins only after an explicit,
+bounded goal run. See [the experimental guide](docs/experimental-mind.md).
+
 This is an implementation of integrated cognition as a simulation.
 First-person language and an animated dashboard are not evidence of
 subjective experience.
@@ -29,6 +34,10 @@ subjective experience.
 - An offline dashboard for conversation, faculty traces, memories, and sources.
 - Explicit reflection, memory consolidation, pause/resume, and optional background work.
 - A bounded arithmetic calculator; displaying code never executes it.
+- Persistent, capacity-limited focus with source-linked items and observable attention changes.
+- Action lifecycle records that distinguish intent, execution, failure, and unknown outcomes.
+- A simulated room with limited visibility, manual controls, bounded goal runs, and evaluator interventions.
+- Observation-only beliefs and online transition learning with scored predictions; no new neural training.
 - A clearly labeled scripted demo using a separate database.
 - Tests that use disposable state rather than deleting the installation's memory.
 
@@ -128,6 +137,10 @@ The important options are:
 | `request_timeout` / `cycle_timeout` | Per-request and whole-cycle time limits in seconds; defaults to 180 / 600. |
 | `background_enabled` | Optional background reflection; disabled initially. |
 | `background_interval` | Minimum interval between background work opportunities. |
+| `workspace_capacity` | Maximum shared focus items; defaults to 6. |
+| `selective_recurrence` | Reuse appropriate faculty results on additional rounds; defaults to true. |
+| `experiment_enabled` | Enable the simulated laboratory controls; defaults to true. This does not start autonomy. |
+| `experiment_max_steps` / `experiment_budget` | Bounds on an explicitly requested goal run; defaults to 10 / 30. |
 
 Only loopback inference hosts and local model tags are accepted. Each
 generation checks Ollama's inventory, including cloud metadata behind aliases.
@@ -154,6 +167,30 @@ The first turn can take longer while Ollama loads the model. Model size,
 hardware, prompt length, and thinking behavior all affect latency. Test memory
 recall, correction, and calculations with the selected model; the scripted demo
 cannot establish live reasoning quality.
+
+## Experimental mind
+
+Open the experimental panel after starting the normal server. Reset creates an
+isolated simulated world, and manual controls let you look, turn, move, inspect,
+pick up, and drop objects. An explicit goal and step limit start a bounded model
+run. User conversation, manual intervention, or Pause interrupts that run; it
+does not resume automatically after a restart.
+
+The agent sees only its observations and accumulated beliefs. The separately
+labeled evaluator view can inspect hidden state and move objects for experiments;
+that full state is not supplied to the models. Simulated actions have no physical
+robot or computer-control effects.
+
+```powershell
+python -B tests/evaluate_mind.py
+```
+
+This prints deterministic, offline component comparisons to stdout using only
+RAM state. It measures belief retention, learning changed controls, and
+attention selection under specific ablations. It makes no model calls and is
+not a consciousness test or a live-model performance benchmark. The
+[experimental guide](docs/experimental-mind.md) explains the controls, scope,
+and interpretation.
 
 ## Memory and correction
 
@@ -258,6 +295,13 @@ and these HTTP routes:
 | `POST /api/control` | Pause or resume. |
 | `POST /api/background` | Enable or disable background work. |
 | `POST /api/stop` | Request graceful shutdown. |
+| `GET /api/experiment` | Agent-visible observation, beliefs, predictions, and experiment status. |
+| `GET /api/experiment/evaluator` | Explicit evaluator-only full-world view; never model context. |
+| `POST /api/experiment/reset` | Start a new simulated world. |
+| `POST /api/experiment/step` | Perform one bounded manual simulated action. |
+| `POST /api/experiment/intervene` | Change the simulated world for evaluation. |
+| `POST /api/experiment/run` | Queue an explicit goal with a bounded number of steps. |
+| `POST /api/experiment/pause` | Pause an active goal run. |
 
 ## License
 
