@@ -155,16 +155,31 @@ async function main () {
   }
   let observation
   let destination
+  const scan = []
   for (let turn = 0; turn < 4 && !destination; turn++) {
     const result = await act('look')
     assert.equal(result.receipt.status, 'succeeded', JSON.stringify(result.receipt))
     observation = await observe()
+    if (gameServer) {
+      const body = manager.get('ai-am')
+      const probe = new Vec3(0, 5, -5)
+      const block = body.bot.blockAt(probe)
+      scan.push({
+        yaw: body.bot.entity.yaw, pitch: body.bot.entity.pitch,
+        visible: observation.visible.map(block => block.id),
+        found: body.bot.findBlocks({ matching: candidate => candidate?.name === 'oak_log', count: 4, maxDistance: 12 }).map(snapshot),
+        observed_block: block?.name, ray_visible: body.visiblePoint(probe.offset(.5, .5, .5), 'block:0,5,-5'),
+        mineflayer_visible: block ? body.bot.canSeeBlock(block) : null,
+        min_y: body.bot.game.minY, height: body.bot.game.height
+      })
+    }
     destination = gameServer
       ? observation.visible.find(block => block.id === 'block:0,5,-5' && block.name === 'oak_log')
       : observation.visible.find(block => block.distance > 3 && block.distance < 9)
   }
   if (gameServer) await poll(() => lookPackets > 0, 3000, 'look packets received by real server')
   mark('look_skill_crossed_real_protocol', { server_look_packets: gameServer ? lookPackets : null })
+  if (!destination) report.navigation_probe = scan
   assert(destination, 'Looking around did not reveal a navigation reference')
   const navigation = await act('navigate', destination.id)
   assert.equal(navigation.receipt.status, 'succeeded', JSON.stringify(navigation.receipt))
