@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - prepare_minecraft.ps1
+      - Setup-AIAMFishbowl.ps1
       - start_minecraft.ps1
       - minecraft/package.json
       - pyproject.toml
@@ -23,15 +24,21 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify plan leaves no files
         run: |
+          $bootstrapPlan = Join-Path $env:RUNNER_TEMP 'AI-AM bootstrap plan'
+          .\Setup-AIAMFishbowl.ps1 -Root $bootstrapPlan -Plan
+          if (Test-Path -LiteralPath $bootstrapPlan) {
+              throw 'The bootstrap created a directory during planning.'
+          }
           $planDir = Join-Path $env:RUNNER_TEMP 'ai-am-setup-plan'
           .\prepare_minecraft.ps1 -DataDir $planDir -Plan
           if (Test-Path -LiteralPath $planDir) {
               throw 'The installer created a directory during planning.'
           }
-      - name: Install portable Minecraft prerequisites
+      - name: Stage the tested checkout and install portable prerequisites
         run: |
-          $dataDir = Join-Path $env:RUNNER_TEMP 'ai-am-setup'
-          .\prepare_minecraft.ps1 -DataDir $dataDir
+          $setupRoot = Join-Path $env:RUNNER_TEMP 'AI-AM fishbowl'
+          .\Setup-AIAMFishbowl.ps1 -Root $setupRoot
+          $dataDir = Join-Path $setupRoot 'data'
           $setup = Get-Content -LiteralPath (Join-Path $dataDir 'prepared.json') -Raw | ConvertFrom-Json
           foreach ($runtime in @($setup.python_exe, $setup.python_base, $setup.node_exe, $setup.java_exe)) {
               if (!$runtime.StartsWith($dataDir + '\', [StringComparison]::OrdinalIgnoreCase) -or !(Test-Path -LiteralPath $runtime -PathType Leaf)) {
@@ -40,7 +47,7 @@ jobs:
           }
           & $setup.python_exe -B -c 'import anyio, fastapi, uvicorn, websockets, httpx, pydantic'
           if ($LASTEXITCODE -ne 0) { throw 'Installed Python dependencies cannot be imported.' }
-          Push-Location minecraft
+          Push-Location (Join-Path $setup.project_dir 'minecraft')
           try {
               & $setup.node_exe -e "require('mineflayer'); require('prismarine-viewer/viewer/lib/worldView')"
               if ($LASTEXITCODE -ne 0) { throw 'Installed bridge dependencies cannot be imported.' }

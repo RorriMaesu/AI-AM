@@ -12,7 +12,9 @@ You need a running local Ollama service with the model named by your mind config
 
 ### 1. Prepare the portable runtimes
 
-From a writable non-C checkout, preview the setup and then run it. Choose a new directory for the runtime installation.
+For a clean installation, run [Setup-AIAMFishbowl.ps1](../Setup-AIAMFishbowl.ps1) from PowerShell with `-Root T:\AIAM-Fishbowl`. Add `-Plan` to preview where it will put the checkout and the runtimes. The script fetches the tested revision and puts `prepared.json` under the new folder's `data` directory. In the remaining examples, use that checkout and manifest path.
+
+If you already have a writable non-C checkout, preview the setup and then run it. Choose a new directory for the runtime installation.
 
 ```powershell
 Set-Location T:\AI-AM
