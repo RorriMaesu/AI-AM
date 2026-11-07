@@ -8,40 +8,25 @@ The bridge connects Mineflayer to a private Minecraft Java server. The Python su
 
 Use a **local drive other than C:** for the repository, Python installation and virtual environment, Node installation and dependencies, Java installation, server/world, model storage, application data, caches, and logs. The launcher rejects C: paths, UNC paths, and path junctions or symbolic links. A virtual environment on T: whose base Python lives on C: is also rejected.
 
-You need existing installations of:
+You need a running local Ollama service with the model named by your mind configuration already installed. Keep Ollama's model storage on your chosen drive. An already-running Ollama service manages its own logs, cache, and model directory.
 
-- Python 3.10 or newer and this project's Python dependencies.
-- Node.js 22 or newer and the dependencies in `minecraft/package.json`.
-- Java 21 and a **Minecraft Java 1.21.4** server.
-- A running local Ollama service with the model named by your mind configuration already installed. Keep Ollama's model storage on your chosen drive too. The launcher does not relocate or configure an already-running Ollama service's own logs, cache, or model directory.
+### 1. Prepare the portable runtimes
 
-The launcher installs nothing, downloads no models or server files, and does not accept the Minecraft EULA. Obtain the server through the [official 1.21.4 release page](https://www.minecraft.net/en-us/article/minecraft-java-edition-1-21-4), using its cross-platform server JAR link. Save the JAR as `server-1.21.4.jar` for the example below. Review the [Minecraft EULA](https://www.minecraft.net/en-us/eula) yourself before accepting it.
-
-Example layout:
-
-| Location | Purpose |
-| --- | --- |
-| `T:\AI-AM` | Repository, including `.venv` and `minecraft\node_modules` |
-| `T:\Runtimes\Python`, `T:\Runtimes\node`, `T:\Runtimes\jdk-21` | Runtime installations |
-| `T:\AIAMMinecraftServer` | Vanilla server JAR, configuration, world, server logs |
-| `T:\AIAMMinecraftData` | Isolated mind databases, runtime configuration, logs, caches |
-
-For an explicit dependency installation, run commands like these after adapting the paths. These commands download dependencies; the launcher itself does not.
+From a writable non-C checkout, preview the setup and then run it. Choose a new directory for the runtime installation.
 
 ```powershell
 Set-Location T:\AI-AM
-New-Item -ItemType Directory -Force T:\AIAMMinecraftData\temp, T:\AIAMMinecraftData\cache | Out-Null
-$env:TEMP = 'T:\AIAMMinecraftData\temp'
-$env:TMP = $env:TEMP
-$env:PIP_CACHE_DIR = 'T:\AIAMMinecraftData\cache\pip'
-$env:NPM_CONFIG_CACHE = 'T:\AIAMMinecraftData\cache\npm'
-$env:PYTHONDONTWRITEBYTECODE = '1'
-& T:\Runtimes\Python\python.exe -m venv T:\AI-AM\.venv
-& T:\AI-AM\.venv\Scripts\python.exe -m pip install -e .
-& T:\Runtimes\node\npm.cmd install --prefix T:\AI-AM\minecraft
+.\prepare_minecraft.ps1 -DataDir T:\AIAMMinecraftData -Plan
+.\prepare_minecraft.ps1 -DataDir T:\AIAMMinecraftData
 ```
 
-## Start the private server separately
+The setup downloads and verifies Python 3.12, Node.js 22, and Java 21 archives. It creates a Python virtual environment, installs the project's Python dependencies, and installs the bridge's npm dependencies into `minecraft\node_modules` in the checkout. Start with a checkout that has no `minecraft\node_modules`. Setup puts its caches and temporary files under the runtime directory and records the exact paths in `prepared.json`.
+
+### 2. Obtain Minecraft Java 1.21.4
+
+Use the cross-platform server JAR link on the [official 1.21.4 release page](https://www.minecraft.net/en-us/article/minecraft-java-edition-1-21-4). Save the JAR as `T:\AIAMMinecraftServer\server-1.21.4.jar` for this example. Review the [Minecraft EULA](https://www.minecraft.net/en-us/eula) before deciding whether to accept it. Server setup and EULA acceptance are separate from preparing the runtimes.
+
+### 3. Start the private server
 
 Prepare a vanilla server in `T:\AIAMMinecraftServer`. After your own EULA decision, ensure `eula.txt` contains `eula=true` and `server.properties` explicitly contains:
 
@@ -59,22 +44,24 @@ The offline identities are for this private loopback experiment. Keep the server
 Start Java from the server directory in its own console. The memory limits below are examples, not measured requirements:
 
 ```powershell
+$setup = Get-Content -Raw T:\AIAMMinecraftData\prepared.json | ConvertFrom-Json
 Set-Location T:\AIAMMinecraftServer
 New-Item -ItemType Directory -Force .\temp | Out-Null
 $env:TEMP = 'T:\AIAMMinecraftServer\temp'
 $env:TMP = $env:TEMP
-& T:\Runtimes\jdk-21\bin\java.exe '-Djava.io.tmpdir=T:\AIAMMinecraftServer\temp' -Xms1G -Xmx2G -jar .\server-1.21.4.jar nogui
+& $setup.java_exe '-Djava.io.tmpdir=T:\AIAMMinecraftServer\temp' -Xms1G -Xmx2G -jar .\server-1.21.4.jar nogui
 ```
 
 The launcher checks the supplied server directory and its configuration, and checks that the loopback port is reachable. It cannot prove that an already-running Java process uses that directory, runtime, or temporary directory. Start that process with the paths you intend. The launcher never changes or stops the Java server. Enter `stop` in the Java console to save and shut it down cleanly.
 
-## Start AI-AM
+### 4. Start AI-AM
 
 In a second PowerShell window:
 
 ```powershell
 Set-Location T:\AI-AM
-.\start_minecraft.ps1 -DataDir T:\AIAMMinecraftData -ServerDir T:\AIAMMinecraftServer -PythonExe T:\AI-AM\.venv\Scripts\python.exe -NodeExe T:\Runtimes\node\node.exe
+$setup = Get-Content -Raw T:\AIAMMinecraftData\prepared.json | ConvertFrom-Json
+.\start_minecraft.ps1 -DataDir $setup.mind_data_dir -ServerDir T:\AIAMMinecraftServer -PythonExe $setup.python_exe -NodeExe $setup.node_exe
 ```
 
 Add `-CheckOnly` to run preflight without starting services or writing launcher files. Add `-Agents 1` for only AI_AM; the default adds Mira. Use `-MindConfig T:\path\mind.json` for an existing mind configuration. The two characters still receive separate data directories. Start with one character if inference is slow.

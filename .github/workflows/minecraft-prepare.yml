@@ -1,0 +1,47 @@
+name: Minecraft portable setup
+
+on:
+  pull_request:
+    paths:
+      - prepare_minecraft.ps1
+      - start_minecraft.ps1
+      - minecraft/package.json
+      - pyproject.toml
+      - .github/workflows/minecraft-prepare.yml
+
+permissions:
+  contents: read
+
+jobs:
+  portable-install:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify plan leaves no files
+        run: |
+          $planDir = Join-Path $env:RUNNER_TEMP 'ai-am-setup-plan'
+          .\prepare_minecraft.ps1 -DataDir $planDir -Plan
+          if (Test-Path -LiteralPath $planDir) {
+              throw 'The installer created a directory during planning.'
+          }
+      - name: Install portable Minecraft prerequisites
+        run: |
+          $dataDir = Join-Path $env:RUNNER_TEMP 'ai-am-setup'
+          .\prepare_minecraft.ps1 -DataDir $dataDir
+          $setup = Get-Content -LiteralPath (Join-Path $dataDir 'prepared.json') -Raw | ConvertFrom-Json
+          foreach ($runtime in @($setup.python_exe, $setup.python_base, $setup.node_exe, $setup.java_exe)) {
+              if (!$runtime.StartsWith($dataDir + '\', [StringComparison]::OrdinalIgnoreCase) -or !(Test-Path -LiteralPath $runtime -PathType Leaf)) {
+                  throw "Expected an installed runtime under $dataDir, found $runtime"
+              }
+          }
+          & $setup.python_exe -B -c 'import anyio, fastapi, uvicorn, websockets, httpx, pydantic'
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Python dependencies cannot be imported.' }
+          Push-Location minecraft
+          try {
+              & $setup.node_exe -e "require('mineflayer'); require('prismarine-viewer/lib/worldView')"
+              if ($LASTEXITCODE -ne 0) { throw 'Installed bridge dependencies cannot be imported.' }
+          } finally { Pop-Location }
