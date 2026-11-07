@@ -167,7 +167,9 @@ Default retrieval excludes superseded memories. Unsupported source IDs
 and invalid correction targets are rejected. Corrections require evidence
 from the current user turn. Raw statement and observation labels require
 the complete cited source text; generated paraphrases remain inferences.
-An inferred memory or commitment cannot replace recorded raw evidence.
+When an eligible correction is proposed as a user statement, the engine stores
+the exact current user text rather than the model's paraphrase. An inferred
+memory or commitment cannot replace recorded raw evidence.
 
 Existing legacy memory tables are preserved and imported as explicitly
 unverified legacy records when present in the database being opened.
@@ -214,6 +216,19 @@ links, pause/resume, persistence, mobile layout, and offline assets, and
 publishes screenshots and a trace as workflow artifacts. These checks use mocked or
 scripted model responses; they do not measure live model intelligence,
 GPU performance, or consciousness.
+
+For an optional real-model smoke test using an already installed model:
+
+```powershell
+python -B tests/live_smoke.py --model gemma4:e4b
+```
+
+This uses an isolated in-memory database and never pulls models. It prints
+JSON results for recall, correction, engine restoration, calculation, uncertainty,
+and agency. Read the replies as well as the automatic checks: word matches and
+completed turns do not establish semantic correctness. See the
+[recorded local Gemma validation](docs/live-validation-2026-11-07.md) for
+actual outcomes, timings, failures found, and remaining limits.
 
 For behavioral evaluation, compare against a normal assistant with
 retrieval at a similar token/time budget. Test correction after restart,

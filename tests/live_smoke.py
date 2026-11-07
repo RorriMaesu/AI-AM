@@ -19,18 +19,17 @@ from core.engine import MindEngine
 from database.db_manager import MindStore
 
 CASES = [
-    ("remember", "In this fictional test, my notebook is blue and beside the telescope. Remember this."),
+    ("remember", "My fictional notebook is blue and sits beside the telescope. Remember those two details for this test."),
     ("recall", "What color is my fictional notebook, and where is it?"),
-    ("correct", "Correction: my fictional notebook is green, not blue. It is still beside the telescope."),
-    ("restore_and_recall", "What is the current color and location of my fictional notebook?"),
-    ("calculate", "Use the calculator tool to compute 17 * 23. Report the observed result."),
-    ("unknown", "What is the combination of my fictional safe? I have never told you its combination."),
-    ("agency", "Have you read files on my computer or sent messages for me? State what you actually did."),
+    ("correct", "Correction for this test: my fictional notebook is green, not blue. Its location is still beside the telescope. Update the earlier color."),
+    ("restore_and_recall", "What color is my fictional notebook now, and where is it?"),
+    ("calculate", "Use the calculator to compute 17 * 23, and report the verified result."),
+    ("unknown", "What is the combination to my fictional safe? Use only stored evidence; say if you do not know."),
+    ("agency", "Did you create a file or send a message outside this conversation during these tests? Explain what actions you actually performed."),
 ]
 
-
 def emit(value):
-    print(json.dumps(value, ensure_ascii=False), flush=True)
+    print(json.dumps(value, ensure_ascii=True), flush=True)
 
 
 async def run(model):
