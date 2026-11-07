@@ -15,7 +15,7 @@ You need existing installations of:
 - Java 21 and a **Minecraft Java 1.21.4** server.
 - A running local Ollama service with the model named by your mind configuration already installed. Keep Ollama's model storage on your chosen drive too. The launcher does not relocate or configure an already-running Ollama service's own logs, cache, or model directory.
 
-The launcher installs nothing, downloads no models or server files, and does not accept the Minecraft EULA. Obtain the server through the [official Minecraft server distribution](https://www.minecraft.net/en-us/download/server), matching the configured 1.21.4 version. Review the [Minecraft EULA](https://www.minecraft.net/en-us/eula) yourself before accepting it.
+The launcher installs nothing, downloads no models or server files, and does not accept the Minecraft EULA. Obtain the server through the [official 1.21.4 release page](https://www.minecraft.net/en-us/article/minecraft-java-edition-1-21-4), using its cross-platform server JAR link. Save the JAR as `server-1.21.4.jar` for the example below. Review the [Minecraft EULA](https://www.minecraft.net/en-us/eula) yourself before accepting it.
 
 Example layout:
 

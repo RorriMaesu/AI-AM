@@ -332,6 +332,7 @@ class AgentBody {
       const block = this.assertBlock(target, observation)
       await this.go(record, block.position, 2)
       if (record.skill === 'navigate') return { position: pos(bot.entity.position) }
+      await this.step(record, () => bot.lookAt(block.position.offset(0.5, 0.5, 0.5)))
       this.assertBlock(target, observation)
       const tool = bot.pathfinder.bestHarvestTool(block)
       if (tool) await this.step(record, () => bot.equip(tool, 'hand'))
@@ -379,6 +380,7 @@ class AgentBody {
       assert(dest && dest.boundingBox === 'empty' && dest.name === 'air', 'Placement requires empty air above reference')
       assert(distance(bot.entity.position, above) > 0.9, 'Cannot place inside own body')
       await this.go(record, reference.position, 2)
+      await this.step(record, () => bot.lookAt(reference.position.offset(0.5, 0.5, 0.5)))
       this.assertBlock(match[2], observation)
       await this.step(record, () => bot.equip(item, 'hand'))
       record.effect_started = true

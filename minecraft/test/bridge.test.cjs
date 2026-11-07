@@ -26,7 +26,7 @@ function fixture (options = {}) {
   bot.canSeeBlock = () => true; bot.canDigBlock = () => true
   bot.recipesFor = id => id === 2 && items.some(i => i.name === 'oak_log' && i.count > 0) ? [{ id }] : []
   bot.look = async (yaw, pitch) => { bot.entity.yaw = yaw; bot.entity.pitch = pitch }
-  bot.lookAt = async () => {}
+  bot.lookAt = async p => { const e = bot.entity.position.offset(0, 1.62, 0); bot.entity.yaw = Math.atan2(-(p.x - e.x), -(p.z - e.z)); bot.entity.pitch = Math.atan2(p.y - e.y, Math.hypot(p.x - e.x, p.z - e.z)) }
   bot.equip = async item => { bot.heldItem = item }
   bot.consume = async () => { bot.heldItem.count--; bot.food = Math.min(20, bot.food + 5) }
   bot.dig = async b => { blocks.delete(key(b.position)); items.push({ name: 'oak_log', type: 1, count: 1 }) }
@@ -115,7 +115,7 @@ test('old observation reference is revalidated against changed world', async () 
 test('look rotates body and confirms heading', async () => {
   const { body, request, settle, bot } = fixture(); body.start()
   body.startAction(request('look')); await settle()
-  assert.equal(body.getAction('a1').status, 'succeeded')
+  assert.equal(body.getAction('a1').status, 'succeeded', body.getAction('a1').reason)
   assert(Math.abs(bot.entity.yaw - Math.PI / 2) < 0.01)
 })
 test('craft verifies actual inventory delta and exposes available recipe only', async () => {
@@ -131,7 +131,7 @@ test('eat requires food increase and consumed inventory', async () => {
   const { body, bot, items, request, settle } = fixture(); body.start()
   bot.food = 10; items.push({ name: 'bread', type: 4, count: 2 })
   body.startAction(request('eat', 'bread')); await settle()
-  assert.equal(body.getAction('a1').status, 'succeeded')
+  assert.equal(body.getAction('a1').status, 'succeeded', body.getAction('a1').reason)
   assert.equal(bot.food, 15); assert.equal(items[0].count, 1)
 })
 test('cancellation prevents any subsequent primitive after pending equip settles', async () => {
@@ -249,4 +249,44 @@ test('creative mode cannot be enabled and mode changes stop a running action', a
   const req = request('look'); bot.game.gameMode = 'spectator'
   body.startAction(req); await settle()
   assert.equal(body.enabled, false); assert.equal(body.getAction('a1').success, false)
+})
+
+test('collect confirms both removed block and acquired server inventory item', async () => {
+  const { body, bot, put, request, settle } = fixture(); body.start()
+  put(0, 65, -3)
+  bot.pathfinder.goto = async () => { bot.entity.position = new Vec3(0, 64, -2) }
+  body.startAction(request('collect', 'block:0,65,-3')); await settle()
+  assert.equal(body.getAction('a1').status, 'succeeded', body.getAction('a1').reason)
+  assert.equal(body.getAction('a1').inventory_delta.oak_log, 1)
+  assert.deepEqual(body.getAction('a1').final_position, { x: 0, y: 64, z: -2 })
+})
+test('place verifies target block and inventory depletion', async () => {
+  const { body, bot, put, items, request, settle } = fixture(); body.start()
+  put(0, 64, -3, 'stone'); items.push({ name: 'oak_planks', count: 2 })
+  bot.pathfinder.goto = async () => { bot.entity.position = new Vec3(0, 64, -2) }
+  bot.placeBlock = async reference => { put(reference.position.x, reference.position.y + 1, reference.position.z, bot.heldItem.name); bot.heldItem.count-- }
+  body.startAction(request('place', 'oak_planks@block:0,64,-3')); await settle()
+  assert.equal(body.getAction('a1').status, 'succeeded', body.getAction('a1').reason)
+  assert.equal(body.getAction('a1').inventory_delta.oak_planks, -1)
+})
+test('give verifies a newly spawned matching item picked up by intended player', async () => {
+  const { body, bot, items, request, settle } = fixture(); body.start()
+  const recipient = { id: 2, username: 'Mira', name: 'player', height: 1.8, position: new Vec3(0, 64, -2) }
+  bot.entities[2] = recipient
+  items.push({ name: 'bread', count: 2, type: 4, metadata: null })
+  bot.toss = async () => {
+    items[0].count--
+    const drop = { id: 3, position: new Vec3(0, 64, -1), getDroppedItem: () => ({ name: 'bread' }) }
+    bot.emit('entitySpawn', drop); bot.emit('playerCollect', recipient, drop)
+  }
+  body.startAction(request('give', 'bread@entity:2')); await settle()
+  assert.equal(body.getAction('a1').status, 'succeeded', body.getAction('a1').reason)
+  assert.equal(body.getAction('a1').result.recipient, 'Mira')
+})
+test('flee uses observed entity and confirms increasing distance', async () => {
+  const { body, bot, request, settle } = fixture(); body.start()
+  bot.entities[2] = { id: 2, name: 'zombie', height: 1.8, position: new Vec3(0, 64, -3) }
+  body.startAction(request('flee', 'entity:2')); await settle()
+  assert.equal(body.getAction('a1').status, 'succeeded', body.getAction('a1').reason)
+  assert(bot.entity.position.z > 0)
 })
