@@ -385,14 +385,14 @@ def test_generated_paraphrase_is_not_a_raw_statement(parts):
     assert any(m["content"] == "The notebook is definitely red." and m["kind"] == "inference" for m in records)
     assert store.get_event(event["id"])["status"] == "complete"
 
-@pytest.mark.parametrize("old_sources", [True, False])
-def test_correction_cannot_replace_raw_evidence_with_an_inference(parts, old_sources):
+@pytest.mark.parametrize("old_sources,replacement_kind", [(True, "user_statement"), (False, "inference"), (False, "commitment")])
+def test_correction_cannot_replace_raw_evidence_with_an_inference(parts, old_sources, replacement_kind):
     config, store = parts
     old = store.append_event("user", "My notebook is blue.", source="user")
     memory = store.add_memory(old["content"], "user_statement", "user", [old["id"]], 1.0)
     def unsupported(payload):
         return decision(memory_updates=[{"content": old["content"] if old_sources else "The notebook must be green.",
-                        "kind": "user_statement" if old_sources else "inference",
+                        "kind": replacement_kind,
                         "source_event_ids": [old["id"] if old_sources else payload["current_event"]["id"]],
                         "confidence": .9, "supersedes": memory["id"]}])
     _, event = run_event(config, store, ScriptBackend([unsupported]), "Where is my notebook?")

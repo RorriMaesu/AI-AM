@@ -477,8 +477,8 @@ class MindEngine:
             if kind == "user_statement" and any(e["kind"] != "user" for e in source_events):
                 raise ValueError("A user statement requires a user event.")
             if kind in ("user_statement", "observation"):
-                normalized = " ".join(proposal["content"].split()).casefold()
-                if not any(normalized == " ".join(e["content"].split()).casefold() for e in source_events):
+                normalized = " ".join(proposal["content"].split())
+                if not any(normalized == " ".join(e["content"].split()) for e in source_events):
                     # A source ID proves attribution, not the faithfulness of a
                     # paraphrase. Preserve generated summaries as inferences.
                     kind = "inference"
@@ -490,7 +490,7 @@ class MindEngine:
             if supersedes and event["id"] not in sources:
                 raise ValueError("A correction requires evidence from the current user turn.")
             if (supersedes and known_memories[supersedes]["kind"] in ("user_statement", "observation")
-                    and kind in ("inference", "reflection")):
+                    and kind not in ("user_statement", "observation")):
                 raise ValueError("An inferred revision cannot replace a recorded statement or observation.")
             # Avoid storing the automatically captured user statement twice.
             if kind == "user_statement" and proposal["content"].strip() == event["content"].strip() and not supersedes:

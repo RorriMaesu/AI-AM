@@ -71,11 +71,17 @@ For a quick interface demonstration:
 
 Open [http://localhost:8002](http://localhost:8002).
 The demo provider is deterministic sample behavior, not an LLM. Its banner
-remains visible, and its database is separate from live memories.
+remains visible, its database is separate, and it never imports live legacy memories.
 
 For live use, start Ollama, install a model that fits your hardware, and set
 its exact installed tag in the configuration. AI-AM never pulls models
-automatically. Then run:
+automatically. Ollama manages its model storage separately: before downloading
+anything, set its `OLLAMA_MODELS` environment variable to a roomy drive,
+such as `T:\OllamaModels`, and restart Ollama so it uses that location.
+AI-AM's `-DataDir` does not relocate an already running Ollama server.
+See [Ollama's environment and storage instructions](https://docs.ollama.com/faq).
+
+Then run:
 
 ```powershell
 .\start_mind.ps1 -DataDir T:\AIAMData
@@ -105,7 +111,10 @@ directory. Set it with `--data-dir`, `AIAM_DATA_DIR`, or the launcher's
 
 Use the actual model tags reported by your local Ollama installation.
 Each role may select its own model, although sharing a single capable
-model is the economical starting point on one GPU.
+model is the economical starting point on one GPU. Calls run sequentially
+to avoid competing for the same GPU. Model choices made in the dashboard
+persist in the database and take precedence over configuration-file model
+defaults after a restart.
 
 The important options are:
 
@@ -136,7 +145,10 @@ said something; it is not automatically an independently verified fact.
 Corrections preserve history. A new memory can supersede an older memory
 by its ID, with references to the events supporting the correction.
 Default retrieval excludes superseded memories. Unsupported source IDs
-and invalid correction targets are rejected.
+and invalid correction targets are rejected. Corrections require evidence
+from the current user turn. Raw statement and observation labels require
+the complete cited source text; generated paraphrases remain inferences.
+An inferred memory or commitment cannot replace recorded raw evidence.
 
 Existing legacy memory tables are preserved and imported as explicitly
 unverified legacy records when present in the database being opened.
@@ -177,7 +189,10 @@ and pytest cache output, and removes only that disposable child afterward.
 It does not delete production configuration, databases, or logs.
 
 GitHub Actions runs Python tests on Linux and Windows with Python 3.10
-and 3.12, plus the dashboard's Node tests. These checks use mocked or
+and 3.12, plus the dashboard's Node tests and a real Chromium browser
+against the demo server. The browser job checks conversation, evidence
+links, pause/resume, persistence, mobile layout, and offline assets, and
+publishes screenshots and a trace as workflow artifacts. These checks use mocked or
 scripted model responses; they do not measure live model intelligence,
 GPU performance, or consciousness.
 
