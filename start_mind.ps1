@@ -1,92 +1,67 @@
-# start_mind.ps1
-# Script to verify Ollama status and launch the Project Antahkarana python orchestrator cleanly.
-
-# 1. Verify if Ollama is already running on port 11434
-$PortBound = Get-NetTCPConnection -LocalPort 11434 -ErrorAction SilentlyContinue
-if ($PortBound) {
-    Write-Host "[Start] Ollama service detected running on port 11434. Backend connection ready." -ForegroundColor Green
-} else {
-    Write-Host "[Warning] Ollama does not seem to be running on port 11434!" -ForegroundColor Red
-    Write-Host "[Warning] Please start Ollama before interacting with the cognitive engine." -ForegroundColor Yellow
+# AI-AM launcher. All writable runtime paths stay inside DataDir.
+[CmdletBinding()]
+param(
+    [string]$DataDir = (Join-Path $PSScriptRoot 'data'),
+    [switch]$Demo,
+    [ValidateRange(1,65535)][int]$Port = 8002
+)
+$ErrorActionPreference = 'Stop'
+if (-not [IO.Path]::IsPathRooted($DataDir)) {
+    $DataDir = Join-Path $PSScriptRoot $DataDir
 }
+$DataDir = [IO.Path]::GetFullPath($DataDir)
 
-# 2. Auto-recover dashboard port if stale runtime is already bound.
+# A busy port is an error, never permission to terminate its owner.
+$Probe = [Net.Sockets.TcpClient]::new()
 try {
-    $DashboardListener = Get-NetTCPConnection -LocalPort 8002 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($DashboardListener) {
-        $OwningProc = Get-CimInstance Win32_Process -Filter "ProcessId = $($DashboardListener.OwningProcess)"
-        $CmdLine = if ($OwningProc) { $OwningProc.CommandLine } else { "" }
-        $ProcName = if ($OwningProc) { $OwningProc.Name } else { "unknown" }
-        $OwnerPid = $DashboardListener.OwningProcess
-
-        Write-Host "[Start] Port 8002 currently owned by PID $OwnerPid ($ProcName). Attempting smart recovery..." -ForegroundColor Yellow
-
-        # Attempt graceful shutdown first. If this is an existing Antahkarana runtime,
-        # it should release the port without force-kill.
-        try {
-            $StopResponse = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8002/api/stop" -ContentType "application/json" -TimeoutSec 3
-            Write-Host "[Start] Graceful stop request sent to existing runtime." -ForegroundColor Yellow
-        } catch {
-            Write-Host "[Start] No graceful stop endpoint response on port 8002. Evaluating process ownership..." -ForegroundColor DarkYellow
-        }
-
-        $Released = $false
-        for ($i = 0; $i -lt 10; $i++) {
-            Start-Sleep -Milliseconds 300
-            $ListenerCheck = Get-NetTCPConnection -LocalPort 8002 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $ListenerCheck) {
-                $Released = $true
-                break
-            }
-        }
-
-        if (-not $Released) {
-            $LooksLikeAntahkarana = $false
-            if ($CmdLine) {
-                $LooksLikeAntahkarana = (
-                    $CmdLine -like "*core\\orchestrator.py*" -or
-                    $CmdLine -like "*core/orchestrator.py*" -or
-                    $CmdLine -like "*AIYogicMind*" -or
-                    $CmdLine -like "*Antahkarana*"
-                )
-            }
-
-            # If command line metadata is unavailable, still allow auto-recovery for stale python workers.
-            if (-not $LooksLikeAntahkarana -and $ProcName -ieq "python.exe") {
-                $LooksLikeAntahkarana = $true
-            }
-
-            if ($LooksLikeAntahkarana) {
-                Write-Host "[Start] Force-closing stale runtime on port 8002 (PID: $OwnerPid)..." -ForegroundColor Yellow
-                Stop-Process -Id $OwnerPid -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Milliseconds 700
-
-                $ListenerCheck = Get-NetTCPConnection -LocalPort 8002 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($ListenerCheck) {
-                    Write-Host "[Error] Port 8002 is still busy after force-close attempt." -ForegroundColor Red
-                    Write-Host "[Error] Stop PID $($ListenerCheck.OwningProcess) manually, then retry ./start_mind.ps1" -ForegroundColor Red
-                    return
-                }
-
-                $Released = $true
-            }
-        }
-
-        if (-not $Released) {
-            Write-Host "[Error] Port 8002 is in use by PID $OwnerPid ($ProcName)." -ForegroundColor Red
-            if ($CmdLine) {
-                Write-Host "[Error] Owner command: $CmdLine" -ForegroundColor Red
-            }
-            Write-Host "[Error] Auto-close skipped because owner does not look like Antahkarana runtime." -ForegroundColor Red
-            Write-Host "[Error] Free port 8002 or run: Stop-Process -Id $OwnerPid -Force" -ForegroundColor Red
-            return
-        }
-
-        Write-Host "[Start] Port 8002 released. Continuing startup..." -ForegroundColor Green
-    }
-} catch {
-    Write-Host "[Warning] Could not verify port 8002 availability: $_" -ForegroundColor Yellow
+    $Pending = $Probe.BeginConnect('127.0.0.1', $Port, $null, $null)
+    $Busy = $Pending.AsyncWaitHandle.WaitOne(300) -and $Probe.Connected
+} finally {
+    $Probe.Dispose()
+}
+if ($Busy) {
+    throw "Port $Port is already occupied. Use stop_mind.ps1 for an existing AI-AM runtime, or choose -Port."
 }
 
-Write-Host "[Start] Launching Antahkarana Orchestrator loop..." -ForegroundColor Cyan
-python core\orchestrator.py
+$Python = (Get-Command python -ErrorAction Stop).Source
+$CacheRoot = Join-Path $DataDir 'cache'
+$TempRoot = Join-Path $CacheRoot 'temp'
+New-Item -ItemType Directory -Path $DataDir, $CacheRoot, $TempRoot -Force | Out-Null
+$Environment = @{
+    'AIAM_DATA_DIR' = $DataDir
+    'PYTHONDONTWRITEBYTECODE' = '1'
+    'PYTHONPYCACHEPREFIX' = (Join-Path $CacheRoot 'pycache')
+    'TEMP' = $TempRoot
+    'TMP' = $TempRoot
+    'PIP_CACHE_DIR' = (Join-Path $CacheRoot 'pip')
+    'HF_HOME' = (Join-Path $CacheRoot 'huggingface')
+    'TORCH_HOME' = (Join-Path $CacheRoot 'torch')
+    'XDG_CACHE_HOME' = $CacheRoot
+}
+$Previous = @{}
+$ProcessExit = 1
+try {
+    foreach ($Key in $Environment.Keys) {
+        $Previous[$Key] = [Environment]::GetEnvironmentVariable($Key, 'Process')
+        [Environment]::SetEnvironmentVariable($Key, $Environment[$Key], 'Process')
+    }
+    $Arguments = @('-B', (Join-Path $PSScriptRoot 'core\orchestrator.py'),
+                   '--data-dir', $DataDir, '--port', "$Port")
+    if ($Demo) { $Arguments += '--demo' }
+    Write-Host "AI-AM dashboard: http://127.0.0.1:$Port" -ForegroundColor Cyan
+    Write-Host "Memory and caches: $DataDir"
+    if ($Demo) {
+        Write-Host 'Demonstration mode: scripted examples; no LLM inference.' -ForegroundColor Yellow
+    } else {
+        Write-Host 'Ollama must already be running with an installed local model.'
+    }
+    & $Python @Arguments
+    $ProcessExit = $LASTEXITCODE
+} finally {
+    foreach ($Key in $Previous.Keys) {
+        [Environment]::SetEnvironmentVariable($Key, $Previous[$Key], 'Process')
+    }
+}
+if ($ProcessExit -ne 0) {
+    Write-Error "AI-AM stopped with exit code $ProcessExit. Check the error above."
+}

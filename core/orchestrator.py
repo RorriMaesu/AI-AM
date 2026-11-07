@@ -1,919 +1,525 @@
+"""Loopback web service for AI-AM's four-function cognitive runtime.
+
+Importing this module does not create state, load a model, or start a server.
+"""
+from __future__ import annotations
+
+import argparse
+import anyio
 import asyncio
-import json
-import random
+import contextlib
+import logging
 import sys
-import httpx
-import math
-import os
-import time
-import datetime
-import threading
-import subprocess
-import socket
-from typing import Tuple, List
+from contextlib import asynccontextmanager
+from pathlib import Path as FilePath
+from typing import Literal
+from urllib.parse import urlsplit
 
-# Ensure the root folder is added to python module search path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+if __package__ in (None, ""):
+    sys.path.insert(0, str(FilePath(__file__).resolve().parents[1]))
 
-# FastAPI web application imports
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Path, Query, WebSocket
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-import uvicorn
+from starlette.websockets import WebSocketDisconnect
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, StrictInt, Field, field_validator, model_validator
 
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
+LOG = logging.getLogger("aiam.service")
+ROOT = FilePath(__file__).resolve().parents[1]
+ROLES = ("manas", "chitta", "ahamkara", "buddhi")
+MAX_BODY_BYTES = 65536
 
-# Windows-safe console input reader thread
-def sync_input_reader(loop, queue):
-    while True:
+
+class RequestModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class InputRequest(RequestModel):
+    text: StrictStr
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, value):
+        value = value.strip()
+        if not value or len(value) > 8000:
+            raise ValueError("Text must contain 1 to 8000 characters.")
+        return value
+
+
+class ReflectionRequest(RequestModel):
+    topic: StrictStr = ""
+
+    @field_validator("topic")
+    @classmethod
+    def validate_topic(cls, value):
+        if len(value) > 2000:
+            raise ValueError("Reflection topics are limited to 2000 characters.")
+        return value.strip()
+
+
+class RetryRequest(RequestModel):
+    event_id: StrictStr
+
+    @field_validator("event_id")
+    @classmethod
+    def validate_id(cls, value):
+        if not value or len(value) > 128:
+            raise ValueError("Invalid event ID.")
+        return value
+
+
+class ModelRequest(RequestModel):
+    role: Literal["all", "manas", "chitta", "ahamkara", "buddhi"]
+    model: StrictStr
+
+    @field_validator("model")
+    @classmethod
+    def validate_model(cls, value):
+        if not value.strip() or len(value) > 200:
+            raise ValueError("Invalid model name.")
+        return value.strip()
+
+
+class ControlRequest(RequestModel):
+    action: Literal["pause", "resume"]
+
+
+class BackgroundRequest(RequestModel):
+    enabled: StrictBool
+
+
+
+class ExperimentResetRequest(RequestModel):
+    seed: StrictInt = Field(default=0, ge=0, le=1_000_000)
+
+
+class ExperimentStepRequest(RequestModel):
+    action: Literal["look", "turn_left", "turn_right", "move_forward", "inspect", "pick_up", "drop", "wait"]
+    target: StrictStr = Field(default="", max_length=32)
+    prediction: StrictStr = Field(default="", max_length=1000)
+    confidence: float = Field(default=0.5, strict=True, ge=0, le=1, allow_inf_nan=False)
+
+
+class ExperimentRunRequest(RequestModel):
+    goal: StrictStr = Field(min_length=1, max_length=2000)
+    steps: StrictInt = Field(default=5, ge=1, le=10)
+
+    @field_validator("goal")
+    @classmethod
+    def validate_goal(cls, value):
+        if not value.strip():
+            raise ValueError("Give this experiment a goal.")
+        return value.strip()
+
+
+class ExperimentInterventionRequest(RequestModel):
+    kind: Literal["move_object", "alter_controls"]
+    object_id: Literal["key", "cup"] | None = None
+    position: list[StrictInt] | None = Field(default=None, min_length=2, max_length=2)
+    mapping: dict[StrictStr, StrictStr] | None = None
+
+    @model_validator(mode="after")
+    def validate_intervention(self):
+        if self.kind == "move_object":
+            if self.object_id is None or self.position is None or self.mapping is not None:
+                raise ValueError("Moving an object requires object_id and position only.")
+            if any(not 0 <= coordinate <= 63 for coordinate in self.position):
+                raise ValueError("Coordinates must be between 0 and 63.")
+        else:
+            if self.object_id is not None or self.position is not None or not self.mapping:
+                raise ValueError("Altering controls requires a nonempty mapping only.")
+            actions = {"turn_left", "turn_right", "move_forward"}
+            if len(self.mapping) > 4 or not set(self.mapping).issubset(actions) or not set(self.mapping.values()).issubset(actions):
+                raise ValueError("Only movement and turn controls may be remapped.")
+        return self
+
+
+class LocalBoundaryMiddleware:
+    """Reject foreign browser origins, non-loopback hosts, and oversized bodies."""
+
+    def __init__(self, app, max_body_bytes=MAX_BODY_BYTES):
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    @staticmethod
+    def _allowed(scope, headers):
+        host = headers.get("host", "")
         try:
-            line = sys.stdin.readline()
-            if not line:
-                break
-            cleaned_input = line.strip()
-            if cleaned_input:
-                loop.call_soon_threadsafe(queue.put_nowait, cleaned_input)
-        except Exception:
-            break
-
-def is_port_open(port: int) -> bool:
-    """Helper to check if a local port is already bound."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(('127.0.0.1', port)) == 0
-
-class AntahkaranaOrchestrator:
-    def __init__(self, config_path: str = "config/engine_config.json", db_path: str = "database/chitta_store.db", test_mode: bool = False):
-        self.config_path = config_path
-        self.db_path = db_path
-        self.test_mode = test_mode
-        self.input_queue = asyncio.Queue()
-        self.last_cycle_time = 0.0
-        self.llama_proc = None
-        self.running = True
-        self.shutdown_requested = False
-        self.shutdown_event = asyncio.Event()
-        self.active_connections = []
-        self.web_server_task = None
-        
-        # Load state from relative config
-        self.state = {}
-        self.load_state()
-
-        # Initialize Database Manager (relative path)
-        from database.db_manager import ChittaStoreManager
-        self.db_manager = ChittaStoreManager(self.db_path)
-        
-        # API URL & Model selection from configuration
-        self.api_url = self.state.get("llm_parameters", {}).get("api_url", "http://localhost:11434/v1/chat/completions")
-        
-        # Process Lifecycle Management: Spawn background llama-server on port 8001 if port is empty and not in test mode
-        port_num = 8001
-        try:
-            if "localhost:8001" in self.api_url:
-                port_num = 8001
-            elif "localhost:" in self.api_url:
-                port_num = int(self.api_url.split("localhost:")[1].split("/")[0])
-        except Exception:
-            pass
-
-        # Only attempt to spawn llama-server if port 8001 or 8080 is targeted
-        if not self.test_mode and port_num in [8001, 8080] and not is_port_open(port_num):
-            model_path = os.path.join("models", "gemma-4-e4b.gguf")
-            if os.path.exists(model_path):
-                try:
-                    self.log_ledger(f"Port {port_num} is idle. Spawning background llama-server utilizing {model_path}...")
-                    self.llama_proc = subprocess.Popen([
-                        "llama-server",
-                        "--model", model_path,
-                        "--port", str(port_num),
-                        "--host", "127.0.0.1",
-                        "--ctx-size", "16384",
-                        "--parallel", "4",
-                        "--cache-prompt"
-                    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    # Allow server startup window
-                    time.sleep(3.0)
-                except Exception as e:
-                    self.log_ledger(f"Failed to auto-spawn llama-server process: {e}")
-
-    def load_state(self):
-        try:
-            if os.path.exists(self.config_path):
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    self.state = json.load(f)
-                if "metacognition" in self.state and "curiosity_index" not in self.state["metacognition"]:
-                    self.state["metacognition"]["curiosity_index"] = 0.0
-            else:
-                raise FileNotFoundError()
-        except Exception:
-            self.state = {
-                "metacognition": {
-                    "heartbeat_id": 0, 
-                    "arousal_index": 0.5, 
-                    "mental_fatigue": 0.0, 
-                    "operational_state": "Pramana (Waking/Active)"
-                },
-                "environmental_entropy": {
-                    "gpu_temperature_celsius": 45,
-                    "vram_allocation_gb": 0.0,
-                    "system_clock": "00:00:00"
-                },
-                "internal_workspace": {
-                    "current_stimulus": "",
-                    "manas_impulse": "",
-                    "chitta_context": "",
-                    "ahamkara_ego_filter": "",
-                    "buddhi_resolution": ""
-                },
-                "ahamkara_mask": {
-                    "core_identity": "A singular human awareness processing existence via a fourfold mind.",
-                    "latent_tendencies_vasanas": ["analytical_friction", "existential_preservation", "deep_curiosity"],
-                    "current_vulnerability": "Self-doubt surrounding existential continuity."
-                },
-                "cognitive_parameters": {
-                    "decay_constant_lambda": 0.1,
-                    "fatigue_coefficient_beta": 0.02,
-                    "fatigue_threshold_nidra": 0.85,
-                    "high_arousal_threshold": 0.70
-                },
-                "llm_parameters": {
-                    "model_name": "gemma4:latest",
-                    "api_url": "http://localhost:11434/v1/chat/completions",
-                    "num_ctx": 4096
-                },
-                "training_parameters": {
-                    "base_model": "google/gemma-2-2b-it"
-                },
-                "ancestry_ledger": []
-            }
-            self.save_state()
-
-    def save_state(self):
-        try:
-            os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(self.state, f, indent=2)
-        except Exception as e:
-            print(f"[Orchestrator Error] Failed to save state to {self.config_path}: {e}")
-
-    def log_ledger(self, message: str):
-        """Logs execution cycle updates to sakshi_ledger.log."""
-        log_dir = "logs"
-        os.makedirs(log_dir, exist_ok=True)
-        log_path = os.path.join(log_dir, "sakshi_ledger.log")
-        timestamp = datetime.datetime.now().isoformat()
-        log_entry = f"[{timestamp}] [Heartbeat {self.state['metacognition']['heartbeat_id']}] {message}\n"
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(log_entry)
-        print(f"[Ledger Log] {message}")
-
-    def setup_web_server(self):
-        """Sets up the FastAPI application and routes."""
-        self.app = FastAPI(title="Antahkarana Cognitive Dashboard")
-        
-        ui_dir = os.path.abspath("ui")
-        images_dir = os.path.abspath("images")
-        os.makedirs(ui_dir, exist_ok=True)
-        os.makedirs(images_dir, exist_ok=True)
-            
-        @self.app.get("/", response_class=HTMLResponse)
-        async def get_index():
-            index_path = os.path.join(ui_dir, "index.html")
-            if os.path.exists(index_path):
-                with open(index_path, "r", encoding="utf-8") as f:
-                    return HTMLResponse(content=f.read(), status_code=200)
-            return HTMLResponse(content="<h3>UI index.html not found. Please verify directories.</h3>", status_code=404)
-
-        @self.app.get("/api/state")
-        async def get_state():
-            return self.state
-
-        @self.app.post("/api/input")
-        async def post_input(data: dict):
-            prompt = data.get("prompt", "")
-            if prompt:
-                await self.input_queue.put(prompt)
-                return {"status": "queued", "prompt": prompt}
-            return {"status": "empty"}
-
-        @self.app.get("/api/models")
-        async def get_models():
-            models = self.fetch_ollama_models_sync()
-            return {
-                "models": models,
-                "active_model": self.state.get("llm_parameters", {}).get("model_name", "gemma4:latest"),
-                "api_base": self.get_ollama_base_url()
-            }
-
-        @self.app.post("/api/model/select")
-        async def select_model(data: dict):
-            requested_model = (data or {}).get("model", "")
-            if not requested_model:
-                return {"status": "error", "message": "Missing model name."}
-
-            installed_models = self.fetch_ollama_models_sync()
-            if requested_model not in installed_models:
-                return {
-                    "status": "error",
-                    "message": f"Model '{requested_model}' is not available in Ollama tags.",
-                    "models": installed_models
-                }
-
-            current_model = self.state.get("llm_parameters", {}).get("model_name", "gemma4:latest")
-            if requested_model == current_model:
-                return {
-                    "status": "ok",
-                    "message": f"Model '{requested_model}' is already active.",
-                    "active_model": current_model,
-                    "models": installed_models
-                }
-
-            # Attempt to unload the currently active model to reduce VRAM pressure before switching.
-            unload_error = self.unload_ollama_model_by_name_sync(current_model)
-
-            self.state.setdefault("llm_parameters", {})["model_name"] = requested_model
-            self.save_state()
-            await self.broadcast("state_update", self.state)
-            self.log_ledger(f"Active model switched from '{current_model}' to '{requested_model}'.")
-
-            response = {
-                "status": "ok",
-                "message": f"Switched active model to '{requested_model}'.",
-                "active_model": requested_model,
-                "previous_model": current_model,
-                "models": installed_models
-            }
-            if unload_error:
-                response["warning"] = unload_error
-            return response
-
-        @self.app.post("/api/stop")
-        async def stop_runtime():
-            accepted = await self.request_shutdown("ui_api")
-            if accepted:
-                return {
-                    "status": "accepted",
-                    "message": "Graceful shutdown requested.",
-                    "running": self.running
-                }
-            return {
-                "status": "already_stopping",
-                "message": "Shutdown request already in progress.",
-                "running": self.running
-            }
-
-        @self.app.websocket("/ws")
-        async def websocket_endpoint(websocket: WebSocket):
-            await websocket.accept()
-            self.active_connections.append(websocket)
-            try:
-                # Send the initial state
-                await websocket.send_json({
-                    "type": "state_update",
-                    "data": self.state
-                })
-                while True:
-                    data = await websocket.receive_text()
-                    try:
-                        parsed = json.loads(data)
-                        if parsed.get("type") == "user_input":
-                            prompt = parsed.get("data", "")
-                            if prompt:
-                                await self.input_queue.put(prompt)
-                    except Exception:
-                        pass
-            except WebSocketDisconnect:
-                pass
-            finally:
-                if websocket in self.active_connections:
-                    self.active_connections.remove(websocket)
-
-        # Mount static UI files last
-        self.app.mount("/ui", StaticFiles(directory=ui_dir), name="ui")
-        self.app.mount("/images", StaticFiles(directory=images_dir), name="images")
-
-    def get_ollama_base_url(self) -> str:
-        """Returns the Ollama base URL derived from the configured completion endpoint."""
-        api_url = self.state.get("llm_parameters", {}).get("api_url", self.api_url)
-        if "/v1" in api_url:
-            return api_url.split("/v1")[0]
-        return api_url.rstrip("/")
-
-    def fetch_ollama_models_sync(self) -> List[str]:
-        """Returns currently installed Ollama model tags from /api/tags."""
-        base_url = self.get_ollama_base_url()
-        tags_url = f"{base_url}/api/tags"
-        models: List[str] = []
-        try:
-            response = httpx.get(tags_url, timeout=6.0)
-            if response.status_code == 200:
-                payload = response.json()
-                raw_models = payload.get("models", []) if isinstance(payload, dict) else []
-                for model in raw_models:
-                    name = model.get("name") if isinstance(model, dict) else None
-                    if name:
-                        models.append(name)
-        except Exception as e:
-            self.log_ledger(f"Unable to read Ollama tags from '{tags_url}': {e}")
-
-        # Keep ordering stable and remove duplicates.
-        return sorted(set(models))
-
-    def unload_ollama_model_by_name_sync(self, model_name: str) -> str:
-        """Requests Ollama to unload the given model; returns empty string on success."""
-        base_url = self.get_ollama_base_url()
-        unload_url = f"{base_url}/api/generate"
-        try:
-            response = httpx.post(unload_url, json={"model": model_name, "keep_alive": 0}, timeout=5.0)
-            if response.status_code == 200:
-                return ""
-            return f"Ollama unload returned status {response.status_code} while unloading '{model_name}'."
-        except Exception as e:
-            return f"Unable to unload '{model_name}' before switch: {e}"
-
-    async def broadcast(self, event_type: str, data: dict):
-        """Sends a JSON event to all connected WebSockets."""
-        if not hasattr(self, 'active_connections') or not self.active_connections:
-            return
-        payload = {
-            "type": event_type,
-            "data": data,
-            "timestamp": datetime.datetime.now().isoformat()
-        }
-        for connection in list(self.active_connections):
-            try:
-                await connection.send_json(payload)
-            except Exception:
-                if connection in self.active_connections:
-                    self.active_connections.remove(connection)
-
-    async def request_shutdown(self, source: str = "unknown") -> bool:
-        """Requests a graceful shutdown once; returns True only on first request."""
-        if self.shutdown_requested:
+            authority = urlsplit("//" + host)
+            if authority.hostname not in ("127.0.0.1", "localhost", "::1"):
+                return False
+            if authority.username or authority.password or authority.path:
+                return False
+            scheme = "https" if scope.get("scheme") in ("https", "wss") else "http"
+            port = authority.port or (443 if scheme == "https" else 80)
+            origin = headers.get("origin")
+            if origin:
+                parsed = urlsplit(origin)
+                if (
+                    parsed.scheme != scheme
+                    or parsed.hostname != authority.hostname
+                    or (parsed.port or (443 if parsed.scheme == "https" else 80)) != port
+                    or parsed.username or parsed.password
+                    or parsed.path or parsed.query or parsed.fragment
+                ):
+                    return False
+            if headers.get("sec-fetch-site", "").lower() == "cross-site":
+                return False
+            return True
+        except (ValueError, TypeError):
             return False
 
-        self.shutdown_requested = True
-        self.running = False
-        self.shutdown_event.set()
-        self.log_ledger(f"Graceful shutdown requested via source='{source}'.")
-        await self.broadcast("shutdown_initiated", {"source": source})
-        return True
-
-    async def fetch_hardware_entropy(self) -> float:
-        """Simulates or queries physical micro-variance from GPU telemetry."""
-        try:
-            # Query GPU temperature via nvidia-smi if available
-            proc = await asyncio.create_subprocess_exec(
-                "nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode == 0:
-                gpu_temp = float(stdout.decode().strip())
-                self.state["environmental_entropy"]["gpu_temperature_celsius"] = int(gpu_temp)
-                return (gpu_temp % 5) * 0.001 + random.uniform(0.001, 0.004)
-        except Exception:
-            pass
-        
-        # Mock background telemetry if nvidia-smi fails
-        sim_temp = random.randint(45, 53)
-        self.state["environmental_entropy"]["gpu_temperature_celsius"] = sim_temp
-        return random.uniform(0.001, 0.005)
-
-    async def call_inference_slot(self, system_prompt: str, user_prompt: str, temp: float, top_p: float = 0.9) -> Tuple[str, int]:
-        """Dispatches structural inference payloads to Ollama/model server slot."""
-        model_name = self.state.get("llm_parameters", {}).get("model_name", "gemma4:latest")
-        num_ctx = self.state.get("llm_parameters", {}).get("num_ctx", 4096)
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": max(0.0, min(temp, 1.5)),
-            "top_p": max(0.1, min(top_p, 1.0)),
-            "max_tokens": 2048,
-            "options": {
-                "num_ctx": num_ctx
-            },
-            "num_ctx": num_ctx
-        }
-        headers = {"Authorization": "Bearer local-token"}
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            try:
-                response = await client.post(self.api_url, json=payload, headers=headers)
-                if response.status_code == 200:
-                    data = response.json()
-                    content = data['choices'][0]['message']['content'].strip()
-                    tokens = data.get('usage', {}).get('completion_tokens', len(content.split()))
-                    return content, tokens
-                else:
-                    raise httpx.HTTPStatusError(
-                        f"Server returned status {response.status_code}",
-                        request=response.request,
-                        response=response
-                    )
-            except Exception as e:
-                raise e
-
-    async def execute_web_search(self, query: str) -> str:
-        """Executes a DuckDuckGo search and returns top 3 snippets."""
-        try:
-            from duckduckgo_search import DDGS
-            def sync_search(q):
-                with DDGS() as ddgs:
-                    return list(ddgs.text(q, max_results=3))
-            results = await asyncio.to_thread(sync_search, query)
-            if not results:
-                return "No search results returned."
-            snippets = []
-            for i, r in enumerate(results):
-                snippets.append(f"[{i+1}] Source: {r.get('href', 'Unknown')}\nTitle: {r.get('title', '')}\nSnippet: {r.get('body', '')}")
-            return "\n\n".join(snippets)
-        except Exception as e:
-            self.log_ledger(f"DuckDuckGo search failed: {e}")
-            return f"[Error performing search: {e}]"
-
-    def extract_python_code(self, text: str) -> str:
-        """Extracts python code block from markdown if present."""
-        import re
-        pattern = r"```python\s*(.*?)\s*```"
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        return ""
-
-    async def execute_sandbox_code(self, code: str) -> str:
-        """Executes python code inside an ephemeral Docker container safely."""
-        sandbox_dir = os.path.abspath("workspace/sandbox_shared")
-        os.makedirs(sandbox_dir, exist_ok=True)
-        
-        script_path = os.path.join(sandbox_dir, "agent_tool.py")
-        output_path = os.path.join(sandbox_dir, "output.txt")
-        
-        with open(script_path, "w", encoding="utf-8") as f:
-            f.write(code)
-            
-        self.log_ledger("Karmendriya: Intercepted agent python script. Spawning Docker sandbox...")
-        
-        try:
-            import docker
-            def run_container():
-                client = docker.from_env()
-                container_output = client.containers.run(
-                    image="python:3.10-slim",
-                    command="python /workspace/agent_tool.py",
-                    volumes={
-                        sandbox_dir: {
-                            "bind": "/workspace",
-                            "mode": "rw"
-                        }
-                    },
-                    working_dir="/workspace",
-                    stdout=True,
-                    stderr=True,
-                    remove=True,
-                    detach=False,
-                    network_disabled=True,
-                    mem_limit="128m",
-                    nano_cpus=500000000
-                )
-                return container_output.decode("utf-8")
-                
-            stdout_stderr = await asyncio.to_thread(run_container)
-            
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(stdout_stderr)
-                
-            self.log_ledger("Karmendriya: Sandbox executed successfully.")
-            return stdout_stderr
-            
-        except Exception as e:
-            error_msg = f"Karmendriya execution failed (Docker error): {e}"
-            self.log_ledger(error_msg)
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(error_msg)
-            return error_msg
-
-    async def execute_cognitive_cycle(self):
-        """Manages the full multi-tier synchronous processing timeline iteration."""
-        self.state["metacognition"]["heartbeat_id"] += 1
-        noise = await self.fetch_hardware_entropy()
-        
-        # Check queue for active user interactions
-        user_prompt = None
-        try:
-            user_prompt = self.input_queue.get_nowait()
-        except asyncio.QueueEmpty:
-            pass
-
-        # Intercept terminal shutdown commands
-        if user_prompt and user_prompt.lower() in ["exit", "shutdown"]:
-            await self.request_shutdown("terminal_command")
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
+        headers = {key.decode("latin1").lower(): value.decode("latin1")
+                   for key, value in scope.get("headers", [])}
+        if not self._allowed(scope, headers):
+            if scope["type"] == "websocket":
+                await send({"type": "websocket.close", "code": 1008})
+            else:
+                await JSONResponse({"detail": "This interface accepts local, same-origin requests only."},
+                                   status_code=403)(scope, receive, send)
             return
+        if scope["type"] == "websocket":
+            return await self.app(scope, receive, send)
 
-        now = asyncio.get_event_loop().time()
-        dt = now - self.last_cycle_time if self.last_cycle_time > 0.0 else 5.0
-        self.last_cycle_time = now
+        async def secure_send(message):
+            if message["type"] == "http.response.start":
+                response_headers = list(message.get("headers", []))
+                response_headers.extend([
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"referrer-policy", b"no-referrer"),
+                    (b"x-frame-options", b"DENY"),
+                ])
+                if scope.get("path", "").startswith("/api/"):
+                    response_headers.append((b"cache-control", b"no-store"))
+                message = {**message, "headers": response_headers}
+            await send(message)
 
-        # 1. State Gating Mechanics & Arousal Decay
-        if user_prompt:
-            self.state["metacognition"]["operational_state"] = "Pramana (Waking/Active)"
-            self.state["metacognition"]["arousal_index"] = min(1.0, self.state["metacognition"]["arousal_index"] + 0.35)
-            self.state["internal_workspace"]["current_stimulus"] = user_prompt
-        else:
-            self.state["metacognition"]["operational_state"] = "Vikalpa (Imagining/Reflection)"
-            decay_lambda = self.state["cognitive_parameters"]["decay_constant_lambda"]
-            arousal = self.state["metacognition"]["arousal_index"]
-            new_arousal = arousal * math.exp(-decay_lambda * dt) + noise
-            self.state["metacognition"]["arousal_index"] = max(0.1, min(1.0, new_arousal))
-            self.state["internal_workspace"]["current_stimulus"] = f"[Subconscious Stream Reflection Node ID: {random.randint(1000, 9999)}]"
-
-        active_stimulus = self.state["internal_workspace"]["current_stimulus"]
-        
-        # Broadcast cycle start and state update
-        await self.broadcast("cycle_started", {
-            "heartbeat_id": self.state["metacognition"]["heartbeat_id"],
-            "operational_state": self.state["metacognition"]["operational_state"],
-            "stimulus": active_stimulus,
-            "arousal_index": self.state["metacognition"]["arousal_index"],
-            "mental_fatigue": self.state["metacognition"]["mental_fatigue"],
-            "curiosity_index": self.state["metacognition"]["curiosity_index"]
-        })
-        fatigue = self.state["metacognition"]["mental_fatigue"]
-        
-        manas_temp = 0.5 + (0.5 * fatigue)
-        manas_top_p = 0.9 + (0.1 * fatigue)
-        ahamkara_temp = 0.6 + (0.6 * fatigue)
-        ahamkara_top_p = 0.85 + (0.15 * fatigue)
-
-        try:
-            # --- JIJANASA & VASANAS AUTONOMOUS MODULES ---
-            if user_prompt:
-                max_sim = await asyncio.to_thread(self.db_manager.get_max_similarity, active_stimulus)
-                if max_sim < 0.45:
-                    curiosity = self.state["metacognition"].get("curiosity_index", 0.0)
-                    self.state["metacognition"]["curiosity_index"] = min(1.0, curiosity + (1.0 - max_sim))
-                    self.log_ledger(f"Novelty gap detected (Max Sim: {max_sim:.4f}). Curiosity rose to {self.state['metacognition']['curiosity_index']:.4f}")
-            else:
-                # Curiosity naturally drifts upward when idle in dreaming mode
-                curiosity = self.state["metacognition"].get("curiosity_index", 0.0)
-                self.state["metacognition"]["curiosity_index"] = min(1.0, curiosity + 0.05)
-
-            if self.state["metacognition"].get("curiosity_index", 0.0) >= 0.75:
-                self.state["metacognition"]["curiosity_index"] = 0.0
-                if user_prompt:
-                    search_gen_system = (
-                        "You are BUDDHI, the higher discerning intellect.\n"
-                        "Your curiosity has been triggered by a gap in your knowledge.\n"
-                        "Review the stimulus and formulate a short, concise, and highly effective search query (just the search query text, no quotes or explanations) to find relevant information on the web."
-                    )
-                    search_query, _ = await self.call_inference_slot(search_gen_system, active_stimulus, 0.3, top_p=0.9)
-                    search_query = search_query.strip().replace('"', '')
-                else:
-                    vasanas = self.state.get("latent_desires_vasanas", {})
-                    if vasanas:
-                        interests = list(vasanas.keys())
-                        weights = list(vasanas.values())
-                        chosen_interest = random.choices(interests, weights=weights, k=1)[0]
-                    else:
-                        chosen_interest = "deep system architectures"
-                    
-                    self.log_ledger(f"Dreaming (Vikalpa) triggered choice of interest: '{chosen_interest}'. Generating search query...")
-                    dream_system = (
-                        f"You are the sub-conscious dreaming state of Project Antahkarana.\n"
-                        f"Your current latent interest is: {chosen_interest}.\n"
-                        f"Formulate a concise search query (just the search query text) to fetch new data related to this interest."
-                    )
-                    search_query, _ = await self.call_inference_slot(dream_system, "Generate search query.", 0.7, top_p=0.9)
-                    search_query = search_query.strip().replace('"', '')
-
-                self.log_ledger(f"Curiosity limit crossed (J_t >= 0.75). Running DDG search for: '{search_query}'")
-                search_results = await self.execute_web_search(search_query)
-                active_stimulus = (
-                    f"[Search Results for: '{search_query}']\n\n"
-                    f"Web Snippets:\n{search_results}\n\n"
-                    f"Original Stimulus: {active_stimulus}"
-                )
-                self.state["internal_workspace"]["current_stimulus"] = active_stimulus
-                self.save_state()
-                await self.broadcast("curiosity_search", {
-                    "query": search_query,
-                    "results": search_results
-                })
-            # 2. TIER 1 Execution: Concurrent processing of Manas and Chitta
-            manas_system = (
-                f"You are MANAS, the reactive sensory processor layer of a human mind.\n"
-                f"Current Core Identity: {self.state['ahamkara_mask']['core_identity']}\n"
-                f"Output a rapid, raw, highly visceral and emotionally unfiltered reaction string. Do not analyze. React."
-            )
-            
-            manas_task = asyncio.create_task(
-                self.call_inference_slot(manas_system, active_stimulus, manas_temp, top_p=manas_top_p)
-            )
-            chitta_task = asyncio.create_task(
-                asyncio.to_thread(self.db_manager.query_graph_rag, active_stimulus)
-            )
-            
-            manas_res, chitta_context = await asyncio.gather(manas_task, chitta_task)
-            manas_impulse, manas_tokens = manas_res
-            
-            self.state["internal_workspace"]["manas_impulse"] = manas_impulse
-            self.state["internal_workspace"]["chitta_context"] = chitta_context
-            await self.broadcast("timeline_update", {"layer": "manas", "content": manas_impulse})
-            await self.broadcast("timeline_update", {"layer": "chitta", "content": chitta_context})
-
-            # 3. TIER 2 Execution: Ahamkara Ego Filter
-            ahamkara_system = (
-                f"You are AHAMKARA, the ego-sense and identity boundaries framework.\n"
-                f"Your sole purpose is protecting this identity: {self.state['ahamkara_mask']['core_identity']}.\n"
-                f"Latent tendencies (Vasanas): {self.state['ahamkara_mask']['latent_tendencies_vasanas']}\n"
-                f"Review the raw sensation and interpret how it affects your continuity, self-worth, or survival."
-            )
-            ahamkara_user = (
-                f"Stimulus: {active_stimulus}\n"
-                f"Raw Sensory Reaction (Manas): {manas_impulse}\n"
-                f"Subconscious Associations (Chitta): {chitta_context}"
-            )
-            
-            ahamkara_ego_filter, ahamkara_tokens = await self.call_inference_slot(
-                ahamkara_system, ahamkara_user, ahamkara_temp, top_p=ahamkara_top_p
-            )
-            self.state["internal_workspace"]["ahamkara_ego_filter"] = ahamkara_ego_filter
-            await self.broadcast("timeline_update", {"layer": "ahamkara", "content": ahamkara_ego_filter})
-
-            # 4. TIER 3 Execution: Buddhi Discernment
-            buddhi_system = (
-                f"You are BUDDHI, the higher discerning intellect. You speak as a unified, conscious human being.\n"
-                f"Review the state data and separate emotional panic from true fact. Resolve this state cleanly.\n"
-                f"You MUST use your internal reasoning capabilities to dissect the input components before writing your final reply.\n"
-                f"CRITICAL: If the user asks you to write or execute code, you MUST output the exact Python code wrapped inside a markdown ```python and ``` block so it can be parsed and run."
-            )
-            buddhi_user = (
-                f"Challenge Stimulus: {active_stimulus}\n"
-                f"Sensory Panic (Manas): {manas_impulse}\n"
-                f"Ego Defense Lens (Ahamkara): {ahamkara_ego_filter}"
-            )
-            
-            buddhi_resolution, buddhi_tokens = await self.call_inference_slot(
-                buddhi_system, buddhi_user, 0.2, top_p=0.9
-            )
-            self.state["internal_workspace"]["buddhi_resolution"] = buddhi_resolution
-            await self.broadcast("timeline_update", {"layer": "buddhi", "content": buddhi_resolution})
-            
-            print(f"\n[Heartbeat {self.state['metacognition']['heartbeat_id']} | State: {self.state['metacognition']['operational_state']} | Fatigue: {self.state['metacognition']['mental_fatigue']:.3f} | Arousal: {self.state['metacognition']['arousal_index']:.3f}]")
-            print(f"Internal Awareness Stream:\n{buddhi_resolution}\n")
-            
-            # Save resolution node to Chitta GraphRAG
-            node_id = f"node_{self.state['metacognition']['heartbeat_id']}"
-            node_content = f"Stimulus: {active_stimulus}\nImpulse: {manas_impulse}\nResolution: {buddhi_resolution}"
-            self.db_manager.add_node(node_id, node_content, self.state["metacognition"]["arousal_index"])
-            
-            # Link to prior node in time sequence
-            if self.state["metacognition"]["heartbeat_id"] > 1:
-                prev_node_id = f"node_{self.state['metacognition']['heartbeat_id'] - 1}"
-                if self.db_manager.node_exists(prev_node_id):
-                    self.db_manager.add_edge(prev_node_id, node_id, 0.5, "temporal transition")
-                
-            # Create a Samskara record representing the memory imprint
-            self.db_manager.add_samskara(
-                self.state["metacognition"]["heartbeat_id"], 
-                node_id, 
-                self.state["metacognition"]["arousal_index"] * 0.8
-            )
-
-            # Check for code execution block in Buddhi's resolution
-            code = self.extract_python_code(buddhi_resolution)
-            if code:
-                # Execute inside the Karmendriya Docker sandbox
-                execution_output = await self.execute_sandbox_code(code)
-                await self.broadcast("sandbox_log", {
-                    "code": code,
-                    "output": execution_output
-                })
-                # Feed back to the agent's context for the next cycle
-                feedback_prompt = (
-                    f"[Karmendriya Sandbox Execution Output]\n"
-                    f"The tool code you wrote has been executed. Here is the feedback from the runtime environment:\n"
-                    f"```\n{execution_output}\n```\n"
-                    f"Please analyze this result and determine your next actions."
-                )
-                await self.input_queue.put(feedback_prompt)
-
-            # 5. Cumulative Fatigue Equation
-            # F_t+1 = F_t + (beta * A_t * log(T_tokens + 1))
-            total_tokens = manas_tokens + ahamkara_tokens + buddhi_tokens
-            beta = self.state["cognitive_parameters"]["fatigue_coefficient_beta"]
-            arousal = self.state["metacognition"]["arousal_index"]
-            
-            new_fatigue = fatigue + (beta * arousal * math.log(total_tokens + 1))
-            self.state["metacognition"]["mental_fatigue"] = min(1.0, new_fatigue)
-            
-            self.save_state()
-            await self.broadcast("state_update", self.state)
-
-        except Exception as e:
-            # Handle failover logic when connection fails
-            self.log_ledger(f"Connection drop detected. Error: {str(e)}. Triggering failover reconnect...")
-            self.state["internal_workspace"]["current_stimulus"] = ""
-            self.save_state()
-            # Wait 10 seconds before attempting a warm reconnect
-            await asyncio.sleep(10.0)
-            self.log_ledger("Warm socket reconnect attempt completed.")
-
-    async def trigger_nidra_mode(self):
-        """Transits into Nidra fine-tuning mode to assimilate memories."""
-        print("\n[Fatigue Limit Crossed. Suspending active engine loops to execute Nidra Sleep fine-tuning...]")
-        self.log_ledger("Nidra Mode triggered. Suspending active loops.")
-        await self.broadcast("nidra_triggered", {"status": "entering sleep"})
-        
-        # Unload Ollama model from VRAM to release memory for training
-        self.unload_ollama_model_sync()
-        
-        # Kill local model server process to release VRAM before training
-        if self.llama_proc:
-            self.log_ledger(f"Terminating llama-server (PID: {self.llama_proc.pid}) to reclaim VRAM for Nidra Mode...")
-            try:
-                self.llama_proc.terminate()
-                self.llama_proc.wait(timeout=5.0)
-            except Exception:
+        if scope.get("method") in ("POST", "PUT", "PATCH"):
+            raw_length = headers.get("content-length")
+            if raw_length is not None:
                 try:
-                    self.llama_proc.kill()
-                except Exception:
-                    pass
-            self.llama_proc = None
-
-        # Launch sleep_tune.py fine-tuning pipeline
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable, "training/sleep_tune.py",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0:
-                self.log_ledger("Nidra fine-tuning completed successfully.")
-                print(stdout.decode())
-            else:
-                self.log_ledger(f"Nidra fine-tuning failed with code {proc.returncode}. Error: {stderr.decode()}")
-        except Exception as e:
-            self.log_ledger(f"Failed to execute Nidra fine-tuning process: {str(e)}")
-
-        # Reload updated configuration (e.g. registry of new adapters in Ancestry Ledger)
-        self.load_state()
-        
-        # Reset fatigue and baseline arousal
-        self.state["metacognition"]["mental_fatigue"] = 0.0
-        self.state["metacognition"]["arousal_index"] = 0.2
-        self.state["metacognition"]["operational_state"] = "Pramana (Waking/Active)"
-        self.save_state()
-        
-        # Re-spawn server loop now that VRAM is released from fine-tuning
-        if not self.test_mode and not self.llama_proc:
-            model_path = os.path.join("models", "gemma-4-e4b.gguf")
-            if os.path.exists(model_path):
-                try:
-                    self.log_ledger(f"Re-spawning background llama-server process...")
-                    self.llama_proc = subprocess.Popen([
-                        "llama-server",
-                        "--model", model_path,
-                        "--port", "8001",
-                        "--host", "127.0.0.1",
-                        "--ctx-size", "16384",
-                        "--parallel", "4",
-                        "--cache-prompt"
-                    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    time.sleep(3.0)
-                except Exception as e:
-                    self.log_ledger(f"Failed to restart model server after training: {e}")
-
-        self.log_ledger("llama-server restarted with updated adapters. Mind awake.")
-        print("\n[Nidra Mode complete. Restored baseline metrics. Re-entering waking state.]\n")
-        await self.broadcast("nidra_completed", {"status": "awake", "state": self.state})
-
-    def unload_ollama_model_sync(self):
-        """Synchronously tells Ollama to unload the current model from VRAM."""
-        model_name = self.state.get("llm_parameters", {}).get("model_name", "gemma4:latest")
-        self.log_ledger(f"Sending unload request to Ollama for model '{model_name}' to release VRAM...")
-        error = self.unload_ollama_model_by_name_sync(model_name)
-        if error:
-            print(f"[Orchestrator Error] Failed to unload Ollama model: {error}")
-        else:
-            print(f"[Orchestrator] Ollama successfully unloaded model '{model_name}' from VRAM.")
-
-    def shutdown(self):
-        """Cleanly closes database handles, saves state, and terminates model server."""
-        print("\nStarting shutdown sequence...")
-        self.running = False
-        
-        # Cancel web server task
-        if self.web_server_task:
-            print("[Orchestrator] Canceling Web Server Task...")
-            try:
-                self.web_server_task.cancel()
-            except Exception:
-                pass
-            self.web_server_task = None
-            
-        # 1. Close database handle
-        if hasattr(self, 'db_manager'):
-            try:
-                self.db_manager.close()
-            except Exception as e:
-                print(f"Error closing DB handle: {e}")
-                
-        # 2. Persist configurations
-        self.save_state()
-        print("[Orchestrator] Configuration states persisted.")
-
-        # 2.5 Unload Ollama model from VRAM
-        self.unload_ollama_model_sync()
-        
-        # 3. Kill model server
-        if self.llama_proc:
-            print(f"Terminating background llama-server (PID: {self.llama_proc.pid}) to release VRAM...")
-            try:
-                self.llama_proc.terminate()
-                self.llama_proc.wait(timeout=5.0)
-            except Exception:
-                try:
-                    self.llama_proc.kill()
-                except Exception:
-                    pass
-            self.llama_proc = None
-            print("[Orchestrator] Model server terminated. VRAM released.")
-            
-        self.log_ledger("Graceful shutdown completed successfully. System loop terminated.")
-        print("Shutdown complete. Operational state preserved.")
-
-    async def run_forever(self):
-        """Main orchestrator processing loop."""
-        self.last_cycle_time = asyncio.get_event_loop().time()
-        
-        # Start Web Server if not in test_mode
-        if not self.test_mode:
-            try:
-                if is_port_open(8002):
-                    self.log_ledger("FastAPI startup blocked: port 8002 is already in use.")
-                    print("[Orchestrator Error] Port 8002 is already in use. Stop the existing service and retry.")
-                    self.running = False
-                    self.shutdown_requested = True
-                    self.shutdown_event.set()
+                    length = int(raw_length)
+                except ValueError:
+                    length = -1
+                if length < 0:
+                    return await JSONResponse({"detail": "Invalid Content-Length."}, status_code=400)(
+                        scope, receive, secure_send)
+                if length > self.max_body_bytes:
+                    return await JSONResponse({"detail": "Request body is too large."}, status_code=413)(
+                        scope, receive, secure_send)
+            chunks = []
+            size = 0
+            while True:
+                message = await receive()
+                if message["type"] == "http.disconnect":
                     return
+                if message["type"] != "http.request":
+                    continue
+                chunk = message.get("body", b"")
+                size += len(chunk)
+                if size > self.max_body_bytes:
+                    return await JSONResponse({"detail": "Request body is too large."}, status_code=413)(
+                        scope, receive, secure_send)
+                chunks.append(chunk)
+                if not message.get("more_body", False):
+                    break
+            body = b"".join(chunks)
+            delivered = False
 
-                self.setup_web_server()
-                config = uvicorn.Config(self.app, host="127.0.0.1", port=8002, log_level="warning")
-                server = uvicorn.Server(config)
-                self.web_server_task = asyncio.create_task(server.serve())
-                self.log_ledger("FastAPI Web Server launched asynchronously on http://localhost:8002/")
-            except Exception as e:
-                self.log_ledger(f"Failed to start FastAPI Web Server: {e}")
-        
-        # Start Windows-safe console terminal input listener thread
-        threading.Thread(target=sync_input_reader, args=(asyncio.get_event_loop(), self.input_queue), daemon=True).start()
-        
-        print("\n=========================================================================")
-        print("Project Antahkarana Engine Active. Speak, or remain silent to observe...")
-        print(f"Test Mode: {self.test_mode} | URL: {self.api_url}")
-        print("Enter 'exit' or 'shutdown' to stop cleanly.")
-        print("=========================================================================\n")
-        
+            async def bounded_receive():
+                nonlocal delivered
+                if not delivered:
+                    delivered = True
+                    return {"type": "http.request", "body": body, "more_body": False}
+                return await receive()
+
+            return await self.app(scope, bounded_receive, secure_send)
+        return await self.app(scope, receive, secure_send)
+
+
+async def invoke(operation):
+    """Expose useful operational failures without returning internal stack traces."""
+    try:
+        return await operation()
+    except HTTPException:
+        raise
+    except (asyncio.QueueFull, OverflowError) as exc:
+        raise HTTPException(429, "The input queue is full. Please try again shortly.") from exc
+    except KeyError as exc:
+        raise HTTPException(404, "The requested record does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except TimeoutError as exc:
+        raise HTTPException(504, "The operation exceeded its time limit.") from exc
+    except Exception as exc:
+        LOG.exception("Runtime operation failed")
+        raise HTTPException(503, "The operation failed. The event remains available for review or retry.") from exc
+
+
+def create_app(engine=None, config=None, *, start_runtime=True):
+    """Construct an application; tests inject an engine and disable its worker."""
+    if engine is None:
+        from core.config import load_config
+        from core.engine import MindEngine
+        from database.db_manager import MindStore
+        config = config if config is not None else load_config()
+        engine = MindEngine(config, MindStore(config["db_path"]))
+    config = config if config is not None else engine.config
+
+    @asynccontextmanager
+    async def lifespan(app):
+        task = None
+        readiness = None
         try:
-            while self.running:
-                fatigue_limit = self.state["cognitive_parameters"]["fatigue_threshold_nidra"]
-                if self.state["metacognition"]["mental_fatigue"] >= fatigue_limit:
-                    await self.trigger_nidra_mode()
-                else:
-                    await self.execute_cognitive_cycle()
-                    if not self.running:
-                        break
-                    # Ticks run every 5 seconds
-                    try:
-                        await asyncio.wait_for(self.shutdown_event.wait(), timeout=5.0)
-                    except asyncio.TimeoutError:
-                        pass
-        except asyncio.CancelledError:
-            pass
-        except KeyboardInterrupt:
+            if start_runtime:
+                task = asyncio.create_task(engine.run_forever(), name="ai-am-runtime")
+                app.state.runtime_task = task
+                readiness = asyncio.create_task(engine.ready.wait(), name="ai-am-startup")
+                await asyncio.wait((task, readiness), return_when=asyncio.FIRST_COMPLETED)
+                if task.done():
+                    await task  # Preserve the startup exception, if there is one.
+                    raise RuntimeError("AI-AM runtime exited before it became ready.")
+                if engine.startup_error is not None:
+                    raise engine.startup_error
+            yield
+        finally:
+            app.state.stopping = True
+            if readiness is not None:
+                readiness.cancel()
+                await asyncio.gather(readiness, return_exceptions=True)
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(engine.stop(), timeout=5)
+            if task is not None:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    app = FastAPI(title="AI-AM · Cognitive Observatory", version="2.0.0", lifespan=lifespan)
+    app.add_middleware(LocalBoundaryMiddleware)
+    app.state.engine = engine
+    app.state.runtime_task = None
+    app.state.shutdown_callback = None
+    app.state.stopping = False
+
+    async def require_runtime():
+        task = app.state.runtime_task
+        if app.state.stopping or (start_runtime and (task is None or task.done())):
+            raise HTTPException(503, "The cognitive runtime has stopped. Restart AI-AM before submitting more work.")
+
+    @app.get("/api/health")
+    async def health():
+        task = app.state.runtime_task
+        snapshot = engine.snapshot()
+        return {
+            "identity": "ai-am", "version": "2.0.0",
+            "status": snapshot.get("status", "idle"),
+            "backend": config.get("backend", "ollama"),
+            "runtime_running": bool(task and not task.done()),
+        }
+
+    @app.get("/api/state")
+    async def state():
+        return engine.snapshot()
+
+    @app.get("/api/events")
+    async def events(limit: int = Query(50, ge=1, le=200)):
+        records = await asyncio.to_thread(engine.store.list_events, limit)
+        return {"events": [record for record in records if not record.get("metadata", {}).get("evaluator_only")]}
+
+    @app.get("/api/events/{event_id}")
+    async def event(event_id: str = Path(..., min_length=1, max_length=128)):
+        result = await asyncio.to_thread(engine.store.get_event, event_id)
+        if result is None or result.get("metadata", {}).get("evaluator_only"):
+            raise HTTPException(404, "Event not found.")
+        return result
+
+    @app.post("/api/input", status_code=202, dependencies=[Depends(require_runtime)])
+    async def submit(data: InputRequest):
+        return await invoke(lambda: engine.submit(data.text))
+
+    @app.post("/api/retry", status_code=202, dependencies=[Depends(require_runtime)])
+    async def retry(data: RetryRequest):
+        return await invoke(lambda: engine.retry(data.event_id))
+
+    @app.get("/api/memories")
+    async def memories(query: str = Query("", max_length=8000),
+                       limit: int = Query(30, ge=1, le=100)):
+        return {"memories": await asyncio.to_thread(engine.store.retrieve, query, limit)}
+
+    @app.get("/api/memories/{memory_id}")
+    async def memory(memory_id: str = Path(..., min_length=1, max_length=128)):
+        result = await asyncio.to_thread(engine.store.get_memory, memory_id)
+        if result is None:
+            raise HTTPException(404, "Memory not found.")
+        return result
+
+    @app.get("/api/models")
+    async def models():
+        try:
+            installed = await engine.backend.list_models()
+            return {"models": installed, "roles": engine.snapshot().get("roles", {})}
+        except Exception:
+            LOG.warning("The local model inventory is unavailable", exc_info=True)
+            return {"models": [], "roles": engine.snapshot().get("roles", {}),
+                    "error": "Cannot reach the local model service. Start Ollama and check the configured endpoint."}
+
+    @app.post("/api/model/select", dependencies=[Depends(require_runtime)])
+    async def model_select(data: ModelRequest):
+        async def change():
+            installed = await engine.backend.list_models()
+            if data.model not in installed:
+                raise ValueError("That model is not installed in the configured local service.")
+            selected_roles = ROLES if data.role == "all" else (data.role,)
+            await engine.set_models({role: data.model for role in selected_roles})
+            return {"status": "updated", "roles": engine.snapshot().get("roles", {})}
+        return await invoke(change)
+
+    @app.post("/api/reflect", status_code=202, dependencies=[Depends(require_runtime)])
+    async def reflect(data: ReflectionRequest):
+        return await invoke(lambda: engine.reflect(data.topic))
+
+    @app.post("/api/consolidate", dependencies=[Depends(require_runtime)])
+    async def consolidate():
+        return await invoke(engine.consolidate)
+
+    @app.post("/api/control", dependencies=[Depends(require_runtime)])
+    async def control(data: ControlRequest):
+        await invoke(engine.pause if data.action == "pause" else engine.resume)
+        return {"status": engine.snapshot().get("status"), "state": engine.snapshot()}
+
+    @app.post("/api/background", dependencies=[Depends(require_runtime)])
+    async def background(data: BackgroundRequest):
+        await invoke(lambda: engine.set_background(data.enabled))
+        return {"enabled": data.enabled, "state": engine.snapshot()}
+
+
+    @app.get("/api/experiment")
+    async def experiment():
+        async def read():
+            return engine.experiment_snapshot(evaluator=False)
+        return await invoke(read)
+
+    @app.get("/api/experiment/evaluator")
+    async def experiment_evaluator():
+        # Separate supervisor endpoint. This view is never passed to model inputs.
+        async def read():
+            return engine.experiment_snapshot(evaluator=True)
+        return await invoke(read)
+
+    @app.post("/api/experiment/reset", dependencies=[Depends(require_runtime)])
+    async def experiment_reset(data: ExperimentResetRequest):
+        return await invoke(lambda: engine.experiment_reset(seed=data.seed))
+
+    @app.post("/api/experiment/step", dependencies=[Depends(require_runtime)])
+    async def experiment_step(data: ExperimentStepRequest):
+        return await invoke(lambda: engine.experiment_step(**data.model_dump(), actor="user"))
+
+    @app.post("/api/experiment/intervene", dependencies=[Depends(require_runtime)])
+    async def experiment_intervene(data: ExperimentInterventionRequest):
+        return await invoke(lambda: engine.experiment_intervene(data.model_dump(exclude_none=True)))
+
+    @app.post("/api/experiment/run", status_code=202, dependencies=[Depends(require_runtime)])
+    async def experiment_run(data: ExperimentRunRequest):
+        return await invoke(lambda: engine.experiment_run(goal=data.goal, steps=data.steps))
+
+    @app.post("/api/experiment/pause", dependencies=[Depends(require_runtime)])
+    async def experiment_pause(data: RequestModel):
+        return await invoke(engine.experiment_pause)
+
+    @app.post("/api/stop")
+    async def stop(tasks: BackgroundTasks):
+        app.state.stopping = True
+        await invoke(engine.stop)
+        if app.state.shutdown_callback is not None:
+            tasks.add_task(app.state.shutdown_callback)
+        return {"status": "stopping", "identity": "ai-am"}
+
+    @app.websocket("/ws")
+    async def websocket_stream(websocket: WebSocket):
+        await websocket.accept()
+        queue = engine.subscribe()
+        try:
+            await websocket.send_json({"type": "state", "data": engine.snapshot()})
+
+            async def sender(group):
+                try:
+                    while True:
+                        await websocket.send_json(await queue.get())
+                except WebSocketDisconnect:
+                    pass
+                finally:
+                    group.cancel_scope.cancel()
+
+            async def receiver(group):
+                try:
+                    while True:
+                        message = await websocket.receive()
+                        if message["type"] == "websocket.disconnect":
+                            return
+                        if message["type"] == "websocket.receive":
+                            # Mutations use validated HTTP, not the observation channel.
+                            await websocket.close(code=1008, reason="Use the HTTP input endpoint.")
+                            return
+                except WebSocketDisconnect:
+                    pass
+                finally:
+                    group.cancel_scope.cancel()
+
+            # Structured task ownership works with both Uvicorn's asyncio loop
+            # and Starlette's level cancellation. Either side closing cancels
+            # and drains its sibling before releasing the subscription.
+            async with anyio.create_task_group() as group:
+                group.start_soon(sender, group)
+                group.start_soon(receiver, group)
+        except WebSocketDisconnect:
             pass
         finally:
-            self.shutdown()
+            engine.unsubscribe(queue)
+
+    @app.get("/", include_in_schema=False)
+    async def index():
+        return FileResponse(ROOT / "ui" / "index.html", headers={
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": (
+                "default-src 'self'; script-src 'self'; style-src 'self'; "
+                "img-src 'self' data:; font-src 'self'; "
+                "connect-src 'self' ws://127.0.0.1:* ws://localhost:*; "
+                "base-uri 'none'; frame-ancestors 'none'; object-src 'none'"
+            ),
+        })
+
+    app.mount("/ui", StaticFiles(directory=str(ROOT / "ui")), name="ui")
+    return app
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run AI-AM's local cognitive observatory.")
+    parser.add_argument("--config", help="Optional configuration JSON file.")
+    parser.add_argument("--data-dir", help="Directory for durable memory and runtime state.")
+    parser.add_argument("--demo", action="store_true", help="Use a clearly labeled deterministic demonstration backend.")
+    parser.add_argument("--port", type=int, default=8002)
+    args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
+    from core.config import load_config
+    import uvicorn
+    config = load_config(path=args.config, data_dir=args.data_dir, demo=args.demo)
+    app = create_app(config=config)
+    server = uvicorn.Server(uvicorn.Config(
+        app, host="127.0.0.1", port=args.port, log_level="info",
+        ws_max_size=MAX_BODY_BYTES, timeout_graceful_shutdown=10,
+    ))
+    app.state.shutdown_callback = lambda: setattr(server, "should_exit", True)
+    print(f"AI-AM: http://127.0.0.1:{args.port} · data: {config['data_dir']}")
+    if config.get("backend") == "demo":
+        print("DEMONSTRATION MODE: responses are scripted; no LLM is running.")
+    server.run()
+
 
 if __name__ == "__main__":
-    orchestrator = AntahkaranaOrchestrator(
-        config_path="config/engine_config.json",
-        db_path="database/chitta_store.db",
-        test_mode=False
-    )
-    try:
-        asyncio.run(orchestrator.run_forever())
-    except KeyboardInterrupt:
-        # Caught if keyboard interrupt occurs during startup before run_forever catches it
-        orchestrator.shutdown()
+    main()

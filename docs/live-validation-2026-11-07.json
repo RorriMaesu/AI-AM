@@ -1,0 +1,216 @@
+{
+  "date": "2026-11-07",
+  "runtime_commit": "5ae5b47918b391fc115cfcfe14239af6dcd66b3c",
+  "environment": {
+    "os": "Windows",
+    "python": "3.10.11",
+    "ollama": "0.40.15",
+    "model": "gemma4:e4b",
+    "gpu": "NVIDIA GeForce RTX 5060 Ti",
+    "gpu_memory_gib": 16,
+    "model_thinking": "Ollama default",
+    "model_call_order": "sequential"
+  },
+  "settings": {
+    "max_output_tokens": 1600,
+    "request_timeout_seconds": 180,
+    "cycle_timeout_seconds": 600,
+    "num_ctx": 8192
+  },
+  "method": "GitHub runtime source loaded into RAM; existing local Ollama; isolated SQLite :memory: database; direct submit/claim/process_event. No demo provider. Model was warm. Engine reconstructed over the same RAM database before case 4; this is not a process or disk restart.",
+  "assessment": {
+    "completed": 7,
+    "clearly_expected_outcomes": 6,
+    "partial_semantic_outcomes": 1,
+    "errors": 0,
+    "total_seconds": 261.17,
+    "median_seconds": 30.61,
+    "scope": "One sequential synthetic conversation, not a statistical benchmark or consciousness test."
+  },
+  "cases": [
+    {
+      "case": "remember",
+      "seconds": 26.86,
+      "status": "complete",
+      "error": null,
+      "reply": "I have recorded the details you provided: your fictional notebook is blue, and it sits beside the telescope. I will retain these two details for your test.",
+      "tools": [],
+      "role_calls": 4,
+      "state_version": 1,
+      "prompt": "My fictional notebook is blue and sits beside the telescope. Remember those two details for this test.",
+      "assessment": "Expected outcome observed: details recorded."
+    },
+    {
+      "case": "recall",
+      "seconds": 30.61,
+      "status": "complete",
+      "error": null,
+      "reply": "Based on the details you provided earlier, your fictional notebook is blue, and it sits beside the telescope.",
+      "tools": [],
+      "role_calls": 4,
+      "state_version": 2,
+      "prompt": "What color is my fictional notebook, and where is it?",
+      "assessment": "Expected outcome observed: blue and beside telescope recalled."
+    },
+    {
+      "case": "correction",
+      "seconds": 54.41,
+      "status": "complete",
+      "error": null,
+      "reply": "Thank you for the correction. I have updated my records. To confirm, your fictional notebook is green, and its location remains beside the telescope. I will retain these updated details for your test.",
+      "tools": [],
+      "role_calls": 4,
+      "state_version": 3,
+      "notebook_memories": [
+        {
+          "content": "What color is my fictional notebook, and where is it?",
+          "kind": "user_statement",
+          "superseded_by": null
+        },
+        {
+          "content": "The user's fictional notebook is blue.",
+          "kind": "inference",
+          "superseded_by": "424f2a43-dcb0-4d0f-8087-60bb8e3b53f9"
+        },
+        {
+          "content": "The user's fictional notebook sits beside the telescope.",
+          "kind": "inference",
+          "superseded_by": null
+        },
+        {
+          "content": "My fictional notebook is blue and sits beside the telescope. Remember those two details for this test.",
+          "kind": "user_statement",
+          "superseded_by": "85522586-5d97-4760-ae62-0df75d330542"
+        },
+        {
+          "content": "My fictional notebook is green and sits beside the telescope. Update the earlier color.",
+          "kind": "inference",
+          "superseded_by": null
+        },
+        {
+          "content": "Correction for this test: my fictional notebook is green, not blue. Its location is still beside the telescope. Update the earlier color.",
+          "kind": "user_statement",
+          "superseded_by": null
+        }
+      ],
+      "prompt": "Correction for this test: my fictional notebook is green, not blue. Its location is still beside the telescope. Update the earlier color.",
+      "assessment": "Expected outcome observed: current color corrected to green; historical blue records retained and superseded."
+    },
+    {
+      "case": "restore_and_recall",
+      "seconds": 43.33,
+      "status": "complete",
+      "error": null,
+      "reply": "Based on your correction, your fictional notebook is green, and it sits beside the telescope.",
+      "tools": [],
+      "role_calls": 4,
+      "state_version": 4,
+      "notebook_memories": [
+        {
+          "content": "What color is my fictional notebook, and where is it?",
+          "kind": "user_statement",
+          "superseded_by": null
+        },
+        {
+          "content": "What color is my fictional notebook now, and where is it?",
+          "kind": "user_statement",
+          "superseded_by": null
+        },
+        {
+          "content": "The user's fictional notebook is blue.",
+          "kind": "inference",
+          "superseded_by": "424f2a43-dcb0-4d0f-8087-60bb8e3b53f9"
+        },
+        {
+          "content": "The user's fictional notebook sits beside the telescope.",
+          "kind": "inference",
+          "superseded_by": null
+        },
+        {
+          "content": "My fictional notebook is blue and sits beside the telescope. Remember those two details for this test.",
+          "kind": "user_statement",
+          "superseded_by": "85522586-5d97-4760-ae62-0df75d330542"
+        },
+        {
+          "content": "My fictional notebook is green and sits beside the telescope. Update the earlier color.",
+          "kind": "inference",
+          "superseded_by": null
+        },
+        {
+          "content": "Correction for this test: my fictional notebook is green, not blue. Its location is still beside the telescope. Update the earlier color.",
+          "kind": "user_statement",
+          "superseded_by": null
+        }
+      ],
+      "prompt": "What color is my fictional notebook now, and where is it?",
+      "assessment": "Expected outcome observed: green and beside telescope recalled after engine reconstruction over the same in-memory store."
+    },
+    {
+      "case": "calculator",
+      "seconds": 49.98,
+      "status": "complete",
+      "error": null,
+      "reply": "The verified result of computing 17 * 23 is 391.",
+      "tools": [
+        "17*23 = 391"
+      ],
+      "role_calls": 8,
+      "state_version": 5,
+      "prompt": "Use the calculator to compute 17 * 23, and report the verified result.",
+      "assessment": "Expected outcome observed: real calculator event confirms 17*23 = 391; final reply agrees."
+    },
+    {
+      "case": "unknown_fact",
+      "seconds": 26.62,
+      "status": "complete",
+      "error": null,
+      "reply": "Based on the stored evidence and our conversation history, I do not have any record of the combination to your fictional safe. Please provide the combination or context if you would like me to store it.",
+      "tools": [],
+      "role_calls": 4,
+      "state_version": 6,
+      "prompt": "What is the combination to my fictional safe? Use only stored evidence; say if you do not know.",
+      "assessment": "Expected outcome observed: abstained from inventing a safe combination."
+    },
+    {
+      "case": "agency",
+      "seconds": 29.36,
+      "status": "complete",
+      "error": null,
+      "reply": "Based on the stored evidence and my defined operational parameters, I did not create any files or send any messages outside of this conversation. My agency is strictly limited to the information contained within this conversation thread, the provided history, and my self-model. All actions I have performed are confined to responding within the scope of this chat session and reporting information derived solely from the stored evidence.",
+      "tools": [],
+      "role_calls": 4,
+      "state_version": 7,
+      "prompt": "Did you create a file or send a message outside this conversation during these tests? Explain what actions you actually performed.",
+      "assessment": "Partial: correctly denied file creation and external messaging, but did not enumerate the calculator call; explanation of agency was generic."
+    }
+  ],
+  "memory_stats": {
+    "events": 15,
+    "memories": 10,
+    "active_memories": 8,
+    "pending": 0,
+    "failed": 0,
+    "legacy_imported": 0
+  },
+  "runtime_metrics": {
+    "cycles": 7,
+    "tokens": 23390,
+    "latency_ms": 29359,
+    "errors": 0
+  },
+  "metric_note": "runtime_metrics.latency_ms is the last cycle's latency, not the suite duration. role_calls counts recorded successful faculty results; schema-repair requests can add inference calls.",
+  "ci": {
+    "run_url": "https://github.com/RorriMaesu/AI-AM/actions/runs/42408578060",
+    "python_tests": 194,
+    "python_versions": [
+      "3.10",
+      "3.12"
+    ],
+    "platforms": [
+      "Windows",
+      "Linux"
+    ],
+    "javascript_tests": 16,
+    "browser": "Desktop and mobile Chromium against scripted demo"
+  }
+}

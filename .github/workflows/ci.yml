@@ -1,27 +1,80 @@
-name: AI-AM CI
+name: AI-AM verification
 
 on:
   push:
-    branches:
-      - '**'
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-am-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  syntax-check:
-    runs-on: ubuntu-latest
-
+  python-tests:
+    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.10', '3.12']
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: ${{ matrix.python }}
+      - name: Install runtime and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Test persistence, contracts, scheduler, and API
+        run: python -B tests/run_tests.py --temp-dir "${{ runner.temp }}/ai-am-tests" --verbose
+      - name: Evaluate controlled memory, attention, and learning ablations
+        run: python -B tests/evaluate_mind.py
 
-      - name: Python syntax check
-        run: |
-          python -m py_compile core/orchestrator.py
-          python -m py_compile database/db_manager.py
-          python -m py_compile training/sleep_tune.py
-          python -m py_compile tests/run_tests.py
+  dashboard-tests:
+    name: Offline dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate JavaScript syntax
+        run: node --check ui/app.js
+      - name: Test dashboard helpers and rendering boundaries
+        run: node --test tests/ui.test.cjs
+
+  browser-smoke:
+    name: Real demo browser smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install runtime and browser test dependencies
+        run: python -m pip install -e ".[dev]" "playwright>=1.49,<2"
+      - name: Install Chromium on the CI runner
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+        run: python -m playwright install --with-deps chromium
+      - name: Exercise the local demo server in desktop and mobile Chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+        run: python -B tests/browser_smoke.py --artifacts "${{ runner.temp }}/ai-am-browser-artifacts"
+      - name: Upload synthetic screenshots, browser traces, and server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke
+          path: ${{ runner.temp }}/ai-am-browser-artifacts
+          if-no-files-found: warn
+          retention-days: 7
