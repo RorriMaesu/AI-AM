@@ -34,10 +34,12 @@ jobs:
           if (Test-Path -LiteralPath $planDir) {
               throw 'The installer created a directory during planning.'
           }
-      - name: Stage the tested checkout and install portable prerequisites
+      - name: Stage the candidate checkout and install portable prerequisites
+        env:
+          FISHBOWL_TEST_REVISION: ${{ github.event.pull_request.head.sha }}
         run: |
           $setupRoot = Join-Path $env:RUNNER_TEMP 'AI-AM fishbowl'
-          .\Setup-AIAMFishbowl.ps1 -Root $setupRoot
+          .\Setup-AIAMFishbowl.ps1 -Root $setupRoot -Revision $env:FISHBOWL_TEST_REVISION
           $dataDir = Join-Path $setupRoot 'data'
           $setup = Get-Content -LiteralPath (Join-Path $dataDir 'prepared.json') -Raw | ConvertFrom-Json
           foreach ($runtime in @($setup.python_exe, $setup.python_base, $setup.node_exe, $setup.java_exe)) {
