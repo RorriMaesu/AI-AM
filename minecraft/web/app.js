@@ -38,6 +38,12 @@
     if (run.active) return agent.active_role ? humanize(agent.active_role) + " thinking" : "Running";
     return humanize(run.status || agent && agent.status || (observation.connected === true ? "Connected" : "Unknown"));
   }
+  function runExplanation(run) {
+    if (!run || run.active) return "";
+    if (run.status === "blocked") return "The last decision ended before a Minecraft action was confirmed.";
+    if (run.status === "failed" || run.status === "error") return "The run failed. Review the reported error and action outcomes before trying again.";
+    return "";
+  }
   function inventorySummary(value) {
     if (!Array.isArray(value)) return "Inventory not reported";
     if (!value.length) return "Inventory empty";
@@ -65,7 +71,7 @@
     });
     return eventMessages.concat(gameChat).filter(function (item) { return item.content; }).slice(-50);
   }
-  var helpers = { safeViewerUrl: safeViewerUrl, agentList: agentList, formatPosition: formatPosition, vitalValue: vitalValue, inventorySummary: inventorySummary, agentStatus: agentStatus, outcomeRecord: outcomeRecord, messageRecords: messageRecords };
+  var helpers = { safeViewerUrl: safeViewerUrl, agentList: agentList, formatPosition: formatPosition, vitalValue: vitalValue, inventorySummary: inventorySummary, agentStatus: agentStatus, runExplanation: runExplanation, outcomeRecord: outcomeRecord, messageRecords: messageRecords };
   if (typeof module !== "undefined" && module.exports) module.exports = helpers;
   if (typeof document === "undefined") return;
   var $ = function (id) { return document.getElementById(id); };
@@ -223,10 +229,11 @@
     $("run-state").textContent = run.active ? "RUNNING · " + text(run.remaining_steps) + " LEFT" : humanize(run.status || "idle").toUpperCase();
     var maxSteps = state.defaults && state.defaults.max_steps;
     $("steps-input").max = String(Number.isInteger(maxSteps) && maxSteps > 0 ? Math.min(30,maxSteps) : 30);
-    $("control-note").textContent = !agent ? "Select a configured agent to enable controls." :
+    var controlNote = !agent ? "Select a configured agent to enable controls." :
       observation.connected !== true ? "The agent is not connected to Minecraft. Run is unavailable; messages, Stop, and mind checkpoints remain available when the supervisor is online." :
       observation.alive === false ? "The agent is dead. A new Run is unavailable until it is alive again. Stop still cancels work." :
       "Stop cancels work and disables body reflexes. Start another explicit Run to continue. Checkpoints save the mind database; the game server saves the world separately.";
+    $("control-note").textContent = [runExplanation(run), controlNote].filter(Boolean).join(" ");
   }
   function render() {
     selectedAgent = state.agents.find(function (agent) { return agent.id === selectedId; }) || null;
@@ -235,7 +242,7 @@
     $("selected-id").textContent = agent ? "AGENT / " + agent.id : "NO AGENT SELECTED";
     $("selected-name").textContent = agent ? agent.name || agent.id : "Waiting for an agent";
     $("agent-status").textContent = agentStatus(agent);
-    $("agent-status").className = "status-pill" + (!agent || observation.connected !== true || observation.alive === false || agent.error ? " warning" : "");
+    $("agent-status").className = "status-pill" + (!agent || observation.connected !== true || observation.alive === false || agent.error || runExplanation(agent.run) ? " warning" : "");
     var activeRuns = state.agents.filter(function (item) { return item.run && item.run.active; }).length;
     $("session-status").textContent = state.bridge_online === false ? "Minecraft bridge offline" : activeRuns ? activeRuns + (activeRuns === 1 ? " agent running" : " agents running") : "Awaiting direction";
     $("session-detail").textContent = state.agents.length + (state.agents.length === 1 ? " configured agent" : " configured agents") + " · " + (state.bridge_online === true ? "bridge online" : state.bridge_online === false ? "bridge unavailable" : "bridge status unknown");

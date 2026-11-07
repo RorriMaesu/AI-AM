@@ -109,6 +109,7 @@ class MinecraftMind(MindEngine):
     environment_tool = "minecraft"
     environment_label = "Minecraft"
     environment_result_statuses = {"succeeded", "failed", "cancelled"}
+    experiment_no_action_status = "blocked"
 
     def __init__(self, config, store, body, bridge, backend=None, inference_slot=None):
         super().__init__(config, store, backend or MinecraftOllamaBackend(config))
@@ -225,6 +226,11 @@ class MinecraftMind(MindEngine):
             except BaseException:
                 await self.stop_body()
                 raise
+
+    def _attention_goals(self, event):
+        if event["kind"] == "experiment":
+            return [{"description": event["content"], "status": "active"}]
+        return super()._attention_goals(event)
 
     def _payload(self, event, memories, workspace, round_number):
         payload = super()._payload(event, memories, workspace, round_number)

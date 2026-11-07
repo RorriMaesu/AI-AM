@@ -8,7 +8,7 @@ import httpx
 
 from core.contracts import BuddhiResult, ROLE_SCHEMAS
 from core.inference import InferenceError, OllamaBackend
-from core.minecraft_inference import MinecraftOllamaBackend, MINECRAFT_ACTIONS
+from core.minecraft_inference import MinecraftOllamaBackend, MINECRAFT_ACTIONS, _scope_current_run
 
 
 def settings():
@@ -190,3 +190,89 @@ class TestMinecraftInference(unittest.TestCase):
                     await MinecraftOllamaBackend(settings(), client).infer("manas", payload())
         asyncio.run(run())
         self.assertEqual(paths, ["/api/tags"])
+
+    def test_current_run_scopes_all_role_requests_without_erasing_memory(self):
+        data = payload()
+        objective = "Turn once and describe the new view."
+        data["current_event"]["content"] = objective
+        data["experiment"]["run"] = {"id": "new-run", "active": True, "goal": objective}
+        old_goals = [{"id": "old-wood", "description": "Gather wood.", "status": "active"}]
+        data["goals"] = copy.deepcopy(old_goals)
+        data["memories"] = [{"id": "wood-memory", "content": "The earlier task was gathering wood.",
+                             "kind": "inference", "source_event_ids": ["earlier"]}]
+        data["history"] = [{"id": "earlier", "kind": "user", "source": "user", "content": "Gather wood."}]
+        data["focus"] = [{"id": "memory:wood-memory", "text": "The earlier task was gathering wood.",
+                          "memory_id": "wood-memory", "source_ids": ["earlier"], "kind": "memory"}]
+        original = copy.deepcopy(data)
+        sent = []
+        async def run():
+            for role, schema_class in ROLE_SCHEMAS.items():
+                value = (decision("look").model_dump() if role == "buddhi"
+                         else schema_class().model_dump())
+                def handler(request):
+                    if request.url.path == "/api/tags":
+                        return httpx.Response(200, json={"models": [{"name": "local:test"}]})
+                    sent.append((role, json.loads(request.content)))
+                    return httpx.Response(200, json={"message": {"content": json.dumps(value)}})
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    await MinecraftOllamaBackend(settings(), client).infer(role, data)
+        asyncio.run(run())
+        self.assertEqual(len(sent), len(ROLE_SCHEMAS))
+        self.assertEqual(data, original)
+        for role, request in sent:
+            with self.subTest(role=role):
+                supplied = json.loads(request["messages"][1]["content"])
+                self.assertEqual(supplied["goals"], [
+                    {"id": "run:new-run", "description": objective, "status": "active"}])
+                self.assertEqual(supplied["background_goals"], old_goals)
+                self.assertEqual(supplied["memories"], original["memories"])
+                self.assertEqual(supplied["history"], original["history"])
+                self.assertEqual(supplied["focus"], original["focus"])
+                self.assertEqual(supplied["experiment"]["observation"]["visible"],
+                                 original["experiment"]["observation"]["visible"])
+                self.assertIn("current operator", request["messages"][0]["content"])
+                self.assertIn("not permission to replace or block", request["messages"][0]["content"])
+        buddhi_prompt = next(request["messages"][0]["content"] for role, request in sent if role == "buddhi")
+        self.assertIn("Choosing action=reply ends this run", buddhi_prompt)
+
+    def test_goal_scope_requires_current_explicit_authorization(self):
+        base = payload()
+        base["experiment"]["run"] = {"id": "new-run", "active": True, "goal": "Look once."}
+        base["goals"] = [{"id": "old-wood", "description": "Gather wood.", "status": "active"}]
+        variants = []
+        for field, value in (("active", False), ("goal", ""), ("id", "")):
+            data = copy.deepcopy(base)
+            data["experiment"]["run"][field] = value
+            variants.append(data)
+        data = copy.deepcopy(base)
+        data["rules"]["environment_enabled"] = False
+        variants.append(data)
+        data = copy.deepcopy(base)
+        data["rules"]["available_actions"] = ["reply"]
+        variants.append(data)
+        data = copy.deepcopy(base)
+        data["current_event"]["kind"] = "user"
+        variants.append(data)
+        data = copy.deepcopy(base)
+        data["experiment"]["domain"] = "simulator"
+        variants.append(data)
+        for data in variants:
+            with self.subTest(data=data):
+                original = copy.deepcopy(data)
+                self.assertEqual(_scope_current_run(data), original)
+                self.assertNotIn("background_goals", data)
+
+    def test_current_run_goal_scope_is_idempotent_and_keeps_grounding(self):
+        data = payload()
+        data["experiment"]["run"] = {"id": "new-run", "active": True, "goal": "Look once."}
+        data["goals"] = [{"id": "old-wood", "description": "Gather wood.", "status": "active"}]
+        scoped = _scope_current_run(copy.deepcopy(data))
+        once = copy.deepcopy(scoped)
+        self.assertEqual(_scope_current_run(scoped), once)
+        self.validate(decision("look"), scoped)
+        with self.assertRaisesRegex(ValueError, "currently visible"):
+            self.validate(decision("navigate", "block:999,64,999"), scoped)
+        bad = decision("look")
+        bad.evidence_ids = ["run:new-run"]
+        with self.assertRaisesRegex(ValueError, "supplied"):
+            self.validate(bad, scoped)

@@ -69,6 +69,7 @@ class MindEngine:
     environment_tool = "simulator"
     environment_label = "Simulation"
     environment_result_statuses = {"succeeded"}
+    experiment_no_action_status = "completed"
 
     def __init__(self, config, store, backend=None):
         self.config = copy.deepcopy(config)
@@ -628,7 +629,7 @@ class MindEngine:
         if record["status"] != "complete":
             run.update(active=False, status="failed")
         elif not executed:
-            run.update(active=False, status="completed")
+            run.update(active=False, status=self.experiment_no_action_status)
         elif self._experiment_stop_requested:
             run.update(active=False, status="paused")
         elif run["active"] and run["remaining_steps"] > 0:
@@ -825,12 +826,16 @@ class MindEngine:
             event, decision["environment_action"], decision.get("target", ""),
             decision.get("prediction", ""), decision.get("prediction_confidence", .5))
 
+    def _attention_goals(self, event):
+        goals = copy.deepcopy(self.state.get("goals", []))
+        if event["kind"] == "experiment":
+            goals.append({"description": event["content"], "status": "active"})
+        return goals
+
     async def _cognitive_cycle(self, event, trace, started):
         capacity = self.config.get("workspace_capacity", 6)
         workspace = initialize_workspace(self.state.get("workspace"), capacity=capacity)
-        workspace["active_goals"] = copy.deepcopy(self.state.get("goals", []))
-        if event["kind"] == "experiment":
-            workspace["active_goals"].append({"description": event["content"], "status": "active"})
+        workspace["active_goals"] = self._attention_goals(event)
         # Retained attention is a retrieval cue; underlying records are fetched
         # again and checked so corrections cannot leave stale evidence in focus.
         stale = set()

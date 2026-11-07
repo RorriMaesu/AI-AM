@@ -75,3 +75,16 @@ test("dashboard has no remote assets, active HTML sinks, or invented demo teleme
   assert.match(html, /No telemetry received yet/);
   assert.match(html, /No viewer connected/);
 });
+
+test("blocked cognition is distinct from failure and never presented as goal completion", () => {
+  const observation = { connected: true, alive: true };
+  assert.equal(ui.agentStatus({ observation, run: { active: false, status: "blocked" } }), "Blocked");
+  assert.equal(ui.agentStatus({ observation, run: { active: false, status: "failed" } }), "Failed");
+  assert.match(ui.runExplanation({ status: "blocked" }), /before a Minecraft action was confirmed/);
+  assert.doesNotMatch(ui.runExplanation({ status: "blocked" }), /run failed/i);
+  assert.match(ui.runExplanation({ status: "failed" }), /run failed/i);
+  assert.doesNotMatch(ui.runExplanation({ status: "failed" }), /before a Minecraft action was confirmed/);
+  assert.equal(ui.runExplanation({ active: true, status: "blocked" }), "", "An active run must not retain a previous blocked explanation");
+  assert.equal(ui.runExplanation({ status: "completed" }), "");
+  assert.equal(ui.runExplanation(undefined), "");
+});

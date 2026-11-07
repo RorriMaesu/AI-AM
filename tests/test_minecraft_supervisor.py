@@ -46,7 +46,7 @@ class ScriptedBody:
         self.closed = True
 
 
-def start_app(tmp_path, monkeypatch, bridge):
+def start_app(tmp_path, monkeypatch, bridge, scripted_decision=None):
     # The hosted CI temp drive may be C:. These isolated fixtures run there
     # only on hosted runners. The production Windows drive guard stays enabled.
     monkeypatch.setattr("core.minecraft_supervisor.data_path", lambda path: path.resolve())
@@ -56,9 +56,12 @@ def start_app(tmp_path, monkeypatch, bridge):
     ]})
     backends = []
 
+    if scripted_decision is None:
+        scripted_decision = decision(action="environment", reply="", environment_action="collect",
+                                     target="block:0,1,0", prediction="Inventory gains one log.")
+
     def factory(_):
-        backend = ScriptBackend([decision(action="environment", reply="", environment_action="collect",
-                                          target="block:0,1,0", prediction="Inventory gains one log.")])
+        backend = ScriptBackend([scripted_decision])
         backends.append(backend)
         return backend
 
@@ -98,6 +101,23 @@ def test_fishbowl_run_records_actual_outcome_and_isolates_companion(tmp_path, mo
         with sqlite3.connect(saved["checkpoint"]) as db:
             assert db.execute("SELECT count(*) FROM mind_actions").fetchone()[0] == 1
     assert bridge.closed
+
+
+def test_reply_without_a_game_action_blocks_the_run(tmp_path, monkeypatch):
+    bridge = ScriptedBody()
+    reply = "I need a clearer view before I can collect wood."
+    client, _ = start_app(tmp_path, monkeypatch, bridge, decision(reply=reply))
+    with client:
+        response = client.post("/api/agents/ai-am/run", json={"goal": "Collect a log.", "steps": 3})
+        assert response.status_code == 202
+        state = wait_for(client, lambda agent: agent["run"]["status"] == "blocked"
+                         and "ai-am" not in bridge.enabled)
+        agent = state["agents"][0]
+        assert agent["run"]["active"] is False
+        assert agent["run"]["remaining_steps"] == 3
+        assert not agent["ledger"] and not bridge.actions
+        assert any(event["kind"] == "assistant" and event["content"] == reply
+                   for event in agent["recent_events"])
 
 
 def test_lost_bridge_ack_is_unknown_and_never_replayed(tmp_path, monkeypatch):
