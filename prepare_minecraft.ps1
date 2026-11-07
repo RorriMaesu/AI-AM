@@ -207,8 +207,10 @@ try {
     $PythonExe = Join-Path $VenvDir 'Scripts\python.exe'
     # Install the checkout's runtime dependencies without creating build metadata in it.
     $dependencyCode = "import sys,json,tomllib; print(json.dumps(tomllib.load(open(sys.argv[1],'rb'))['project']['dependencies']))"
-    $pythonDependencies = @((& $PythonExe -B -c $dependencyCode (Join-Path $ProjectDir 'pyproject.toml')) | ConvertFrom-Json)
-    if ($LASTEXITCODE -ne 0 -or -not $pythonDependencies.Count) { throw 'Could not read Python dependency requirements.' }
+    $dependencyJson = & $PythonExe -B -c $dependencyCode (Join-Path $ProjectDir 'pyproject.toml')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read Python dependency requirements.' }
+    [string[]]$pythonDependencies = ConvertFrom-Json -InputObject $dependencyJson
+    if (-not $pythonDependencies.Count) { throw 'The checkout has no Python dependency requirements.' }
     Run-PreparationCommand $PythonExe (@('-B', '-m', 'pip', 'install', '--disable-pip-version-check', '--only-binary=:all:') + $pythonDependencies)
 
     Write-Host 'Installing Minecraft bridge dependencies with install scripts disabled...'
