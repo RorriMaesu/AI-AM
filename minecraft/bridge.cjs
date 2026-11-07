@@ -135,7 +135,14 @@ class AgentBody {
   visibleBlocks () {
     const bot = this.bot
     const interesting = b => b && ((b.boundingBox !== 'empty' && /log|wood|stone|coal|iron|crafting_table|furnace|dirt|grass_block|sand|planks|leaves|bed|chest|hay_block/.test(b.name)) || CROPS.has(b.name))
-    const all = bot.findBlocks({ matching: interesting, maxDistance: 12, count: 128 })
+    const priority = name => {
+      if (/log|crafting_table|furnace|bed|chest|hay_block/.test(name) || CROPS.has(name)) return 0
+      return /stone|coal|iron|planks/.test(name) ? 1 : 2
+    }
+    // Nearby ground can fill the search cap before useful blocks are considered.
+    const resources = bot.findBlocks({ matching: block => interesting(block) && priority(block.name) < 2, maxDistance: 12, count: 96 })
+    const terrain = bot.findBlocks({ matching: block => interesting(block) && priority(block.name) === 2, maxDistance: 12, count: 128 })
+    const all = resources.concat(terrain)
     const result = []
     for (const p of all) {
       const b = bot.blockAt(p)
@@ -144,7 +151,6 @@ class AgentBody {
       if (this.visiblePoint(center, id) && (CROPS.has(b.name) || bot.canSeeBlock(b))) result.push({ id, name: b.name, ...(CROPS.has(b.name) ? { age: b.getProperties?.().age ?? null } : {}), position: pos(p), distance: Math.round(distance(bot.entity.position, p) * 10) / 10 })
     }
     result.sort((a, b) => {
-      const priority = n => /log|crafting_table|furnace|bed|chest|hay_block/.test(n) || CROPS.has(n) ? 0 : /stone|coal|iron|planks/.test(n) ? 1 : 2
       return priority(a.name) - priority(b.name) || a.distance - b.distance || a.id.localeCompare(b.id)
     })
     return result.slice(0, 18)

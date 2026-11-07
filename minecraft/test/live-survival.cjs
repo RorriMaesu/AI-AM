@@ -153,17 +153,19 @@ async function main () {
     const player = gameServer.getPlayer('AIAM_Test')
     for (const event of ['look', 'position_look']) player._client.on(event, () => { lookPackets++ })
   }
-  for (let i = 0; i < 4; i++) {
+  let observation
+  let destination
+  for (let turn = 0; turn < 4 && !destination; turn++) {
     const result = await act('look')
     assert.equal(result.receipt.status, 'succeeded', JSON.stringify(result.receipt))
+    observation = await observe()
+    destination = gameServer
+      ? observation.visible.find(block => block.id === 'block:0,5,-5' && block.name === 'oak_log')
+      : observation.visible.find(block => block.distance > 3 && block.distance < 9)
   }
   if (gameServer) await poll(() => lookPackets > 0, 3000, 'look packets received by real server')
   mark('look_skill_crossed_real_protocol', { server_look_packets: gameServer ? lookPackets : null })
-
-  let observation = await observe()
-  let destination = observation.visible.find(b => b.name === 'oak_log' && b.distance > 2.5)
-  if (!destination) destination = observation.visible.find(b => b.distance > 3 && b.distance < 9)
-  assert(destination, 'A visible navigation reference must exist in the real world')
+  assert(destination, 'Looking around did not reveal a navigation reference')
   const navigation = await act('navigate', destination.id)
   assert.equal(navigation.receipt.status, 'succeeded', JSON.stringify(navigation.receipt))
   assert(distance(navigation.before, navigation.after) > 0.4, 'Bot position must actually change')

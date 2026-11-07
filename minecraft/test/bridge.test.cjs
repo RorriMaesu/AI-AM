@@ -22,7 +22,11 @@ function fixture (options = {}) {
   bot.inventory = { items: () => items.filter(i => i.count > 0) }
   bot.registry = { items: { 1: { id: 1, name: 'oak_log' } }, itemsByName: { oak_planks: { id: 2 }, stick: { id: 3 } }, blocksByName: { oak_planks: { id: 2 } } }
   bot.blockAt = p => blocks.get(key(p)) || { name: 'air', type: 0, boundingBox: 'empty', position: new Vec3(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)) }
-  bot.findBlocks = () => [...blocks.values()].map(b => b.position)
+  bot.findBlocks = ({ matching, count }) => {
+    const distance = p => Math.hypot(p.x - bot.entity.position.x, p.y - bot.entity.position.y, p.z - bot.entity.position.z)
+    return [...blocks.values()].filter(matching).map(block => block.position)
+      .sort((left, right) => distance(left) - distance(right)).slice(0, count)
+  }
   bot.canSeeBlock = () => true; bot.canDigBlock = () => true
   bot.recipesFor = id => id === 2 && items.some(i => i.name === 'oak_log' && i.count > 0) ? [{ id }] : []
   bot.look = async (yaw, pitch) => { bot.entity.yaw = yaw; bot.entity.pitch = pitch }
@@ -82,6 +86,17 @@ test('observation hides behind-camera and occluded blocks and entities', () => {
   assert(!observation.visible.some(b => b.id === 'block:0,65,3' || b.name === 'iron_ore'))
   assert.equal(observation.nearby.length, 0)
   assert.equal(observation.connected, true); assert.equal(observation.enabled, false)
+})
+test('nearby terrain cannot crowd a visible log out of the resource search', () => {
+  const { body, put } = fixture()
+  for (let x = -6; x <= 6; x++) {
+    for (let z = -6; z <= 6; z++) {
+      put(x, 62, z, 'dirt')
+      put(x, 63, z, 'dirt')
+    }
+  }
+  put(0, 65, -10, 'oak_log')
+  assert(body.observe().visible.some(block => block.id === 'block:0,65,-10'))
 })
 test('chat is bounded and proximity-scoped including stable source ids', () => {
   const { body, bot } = fixture()
