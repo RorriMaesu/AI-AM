@@ -178,7 +178,8 @@ def main():
                 with LOCK:
                     STATE["agents"][0]["observation"]["body_session"] = "fixture-reconnected"
                 page.locator("#refresh-button").click()
-                page.wait_for_function("window.fixtureFrame !== document.getElementById('world-viewer')")
+                expect(page.locator("#world-viewer")).to_have_attribute("data-body-session", "fixture-reconnected")
+                assert page.evaluate("window.fixtureFrame !== document.getElementById('world-viewer')")
                 assert_no_overflow(page)
                 page.screenshot(path=str(artifacts / "minecraft-fishbowl-desktop-fixture.png"), full_page=True)
 

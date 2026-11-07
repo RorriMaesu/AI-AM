@@ -135,6 +135,7 @@
       if (url && agent) {
         var frame = document.createElement("iframe"); frame.id = "world-viewer"; frame.src = url;
         frame.title = text(agent.name || agent.id) + " · local Minecraft viewer";
+        frame.dataset.bodySession = text(observation.body_session || "");
         frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-pointer-lock"); frame.setAttribute("allow", "fullscreen"); frame.setAttribute("referrerpolicy", "no-referrer");
         frame.addEventListener("load", function () { if (viewerKey === key) { frameLoaded = true; renderViewer(selectedAgent); } });
         $("viewer-stage").appendChild(frame);

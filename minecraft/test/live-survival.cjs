@@ -97,7 +97,13 @@ async function main () {
   for (const body of bodies) {
     assert.equal(body.bot.version, '1.21.4')
     assert.equal(body.bot.game.gameMode, 'survival')
-    await body.bot.waitForChunksToLoad()
+    await poll(() => body.bot.world?.getColumnAt(body.bot.entity.position), 10000,
+      'spawn terrain decoded from actual chunk packets for ' + body.config.id)
+  }
+  if (gameServer) {
+    const fixtureLog = new Vec3(0, 5, -5)
+    await poll(() => bodies.every(body => body.bot.blockAt(fixtureLog)?.name === 'oak_log'),
+      10000, 'both players received the fixture log through the game connection')
   }
   mark('two_real_clients_spawned_in_survival', { agents: bodies.map(b => ({ id: b.config.id, version: b.bot.version, position: snapshot(b.bot.entity.position) })) })
   assert.equal((await observe()).enabled, false, 'Joining must not automatically enable the body')
