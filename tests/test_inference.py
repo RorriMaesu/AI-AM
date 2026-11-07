@@ -15,6 +15,13 @@ def settings():
         "roles": {role: {"model": "qwen3:8b", "temperature": 0.2} for role in ROLE_SCHEMAS},
     }
 
+def model_transport(handler):
+    def local_inventory(request):
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+        return handler(request)
+    return httpx.MockTransport(local_inventory)
+
 def test_native_api_schema_and_context_are_sent():
     requests = []
     def handler(request):
@@ -24,7 +31,7 @@ def test_native_api_schema_and_context_are_sent():
             "eval_count": 12,
         })
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
             result, tokens = await OllamaBackend(settings(), client).infer("manas", {"current_event": {"content": "Hello"}})
             assert result["observations"] == ["A message arrived."]
             assert tokens == 12
@@ -34,6 +41,7 @@ def test_native_api_schema_and_context_are_sent():
     assert body["options"] == {"temperature": 0.2, "num_ctx": 8192, "num_predict": 600}
     assert body["format"]["additionalProperties"] is False
     assert body["stream"] is False
+    assert json.dumps(body["format"], separators=(",", ":")) in body["messages"][0]["content"]
 
 def test_bad_schema_has_only_one_repair_and_counts_both_calls():
     calls = []
@@ -42,7 +50,7 @@ def test_bad_schema_has_only_one_repair_and_counts_both_calls():
         content = '{"salience":7}' if len(calls) == 1 else '{"salience":0.5}'
         return httpx.Response(200, json={"message": {"content": content}, "eval_count": 10})
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
             result, tokens = await OllamaBackend(settings(), client).infer("manas", {})
             assert result["salience"] == 0.5
             assert tokens == 20
@@ -57,7 +65,7 @@ def test_invalid_output_is_never_reported_as_success():
         count += 1
         return httpx.Response(200, json={"message": {"content": "not JSON"}})
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
             with pytest.raises(InferenceError, match="one repair attempt"):
                 await OllamaBackend(settings(), client).infer("buddhi", {})
     asyncio.run(run())
@@ -70,7 +78,7 @@ def test_http_failure_is_not_retried_as_schema_repair():
         count += 1
         return httpx.Response(404, json={"error": "model missing"})
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
             with pytest.raises(InferenceError, match="HTTP 404"):
                 await OllamaBackend(settings(), client).infer("manas", {})
     asyncio.run(run())
@@ -82,7 +90,7 @@ def test_redirect_is_rejected_without_following():
         urls.append(str(request.url))
         return httpx.Response(307, headers={"location": "https://remote.example/api/chat"})
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True) as client:
+        async with httpx.AsyncClient(transport=model_transport(handler), follow_redirects=True) as client:
             with pytest.raises(InferenceError, match="HTTP 307"):
                 await OllamaBackend(settings(), client).infer("manas", {})
     asyncio.run(run())
@@ -92,7 +100,7 @@ def test_response_size_is_bounded():
     def handler(request):
         return httpx.Response(200, json={"message": {"content": "x" * 140000}})
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
             with pytest.raises(InferenceError, match="size limit"):
                 await OllamaBackend(settings(), client).infer("manas", {})
     asyncio.run(run())
@@ -167,10 +175,77 @@ def test_duplicate_workspace_memories_are_removed_without_mutating_source():
         sent.append(json.loads(request.content))
         return httpx.Response(200, json={"message": {"content": "{}"}})
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
             await OllamaBackend(settings(), client).infer("chitta", payload)
     asyncio.run(run())
     actual = json.loads(sent[0]["messages"][1]["content"])
     assert actual["memories"][0]["source_event_ids"] == ["e0"]
     assert "memories" not in actual["workspace"]
     assert "memories" in payload["workspace"]
+
+def test_cloud_backed_alias_is_rejected_before_generation():
+    requests = []
+    def handler(request):
+        requests.append(request.url.path)
+        assert request.url.path == "/api/tags"
+        return httpx.Response(200, json={"models": [
+            {"name": "qwen3:8b", "remote_host": "https://ollama.com", "remote_model": "remote"}
+        ]})
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(InferenceError, match="not installed as a local"):
+                await OllamaBackend(settings(), client).infer("manas", {})
+    asyncio.run(run())
+    assert requests == ["/api/tags"]
+
+def test_unqualified_local_tag_resolves_to_latest_inventory():
+    config = settings()
+    config["roles"]["manas"]["model"] = "local-model"
+    requests = []
+    def handler(request):
+        requests.append(request.url.path)
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [{"name": "local-model:latest"}]})
+        return httpx.Response(200, json={"message": {"content": "{}"}})
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await OllamaBackend(config, client).infer("manas", {})
+    asyncio.run(run())
+    assert requests == ["/api/tags", "/api/chat"]
+
+def test_schema_repair_cannot_overfill_complete_context():
+    config = settings()
+    config["num_ctx"] = 4096
+    calls = []
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, json={"message": {"content": "x" * 10000}})
+    async def run():
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
+            with pytest.raises(InferenceError, match="Complete cognitive context budget"):
+                await OllamaBackend(config, client).infer("manas", {})
+    asyncio.run(run())
+    assert calls == ["/api/chat"]
+
+def test_remote_alias_change_is_checked_between_calls():
+    inventory_count = 0
+    generations = 0
+    def handler(request):
+        nonlocal inventory_count, generations
+        if request.url.path == "/api/tags":
+            inventory_count += 1
+            model = {"name": "qwen3:8b"}
+            if inventory_count > 1:
+                model["remote_model"] = "remote"
+            return httpx.Response(200, json={"models": [model]})
+        generations += 1
+        return httpx.Response(200, json={"message": {"content": "{}"}})
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            backend = OllamaBackend(settings(), client)
+            await backend.infer("manas", {})
+            with pytest.raises(InferenceError, match="not installed as a local"):
+                await backend.infer("chitta", {})
+    asyncio.run(run())
+    assert inventory_count == 2
+    assert generations == 1

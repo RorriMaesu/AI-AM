@@ -90,17 +90,33 @@ class OllamaBackend:
         schema = ROLE_SCHEMAS[role]
         model = validate_model_name(self.config["roles"][role]["model"])
         serialized = _context_payload(payload, self.config.get("num_ctx", 8192))
+        output_schema = schema.model_json_schema()
+        # The format parameter constrains decoding. The prompt also needs to
+        # communicate the fields and their meaning to the model.
+        system_prompt = ROLE_PROMPTS[role] + "\nOutput JSON schema:\n" + json.dumps(output_schema, separators=(",", ":"))
         messages = [
-            {"role": "system", "content": ROLE_PROMPTS[role]},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": serialized},
         ]
         token_count = 0
         for attempt in range(2):
+            # A conservative character estimate, including schema and repair
+            # context, with space reserved for output and chat framing.
+            budget = min(MAX_PAYLOAD_CHARS, max(0, (
+                self.config.get("num_ctx", 8192) - self.config.get("max_output_tokens", 600) - 256
+            ) * 3))
+            if sum(len(message["content"]) for message in messages) > budget:
+                raise InferenceError("Complete cognitive context budget exceeded, including schema or repair. Increase num_ctx or shorten the input.")
+            # A harmless-looking local alias can point to an Ollama cloud model.
+            # Check server metadata before every generation, not just UI selection.
+            installed = await self.list_models()
+            if model not in installed and model + ":latest" not in installed:
+                raise InferenceError(f"The model '{model}' is not installed as a local model. Select an installed local tag.")
             request = {
                 "model": model,
                 "messages": messages,
                 "stream": False,
-                "format": schema.model_json_schema(),
+                "format": output_schema,
                 "options": {
                     "temperature": self.config["roles"][role]["temperature"],
                     "num_ctx": self.config.get("num_ctx", 8192),

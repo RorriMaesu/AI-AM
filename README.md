@@ -129,12 +129,20 @@ The important options are:
 | `background_enabled` | Optional background reflection; disabled initially. |
 | `background_interval` | Minimum interval between background work opportunities. |
 
-Only loopback inference hosts and local model tags are accepted. The app
+Only loopback inference hosts and local model tags are accepted. Each
+generation checks Ollama's inventory, including cloud metadata behind aliases.
+The JSON schema is supplied in both the generation format and the prompt;
+the complete prompt, schema, repair context, and reserved output share one
+estimated context budget. The app
 does not browse the web autonomously. The dashboard's scripts, styles,
 and fonts do not depend on a CDN.
 
 A large context and several resident models increase memory demand.
 Measure latency and VRAM before increasing parallelism or model count.
+Thinking-capable models use their Ollama default thinking mode; AI-AM consumes
+their structured final content. Models that spend the output budget thinking
+may need a larger `max_output_tokens` and cycle timeout. This remains a live
+model compatibility check, not something the scripted demo can establish.
 
 ## Memory and correction
 
