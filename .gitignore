@@ -1,24 +1,36 @@
-# Python
+# Python and tools
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 .venv/
 venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
 
 # Environment / secrets
 .env
 *.env
 
-# Logs and runtime artifacts
+# Runtime state and caches
+data/
+.aiam/
+.test-tmp/
 logs/
+scratch/
 workspace/sandbox_shared/output.txt
-
-# Database runtime files
 database/*.db
 database/*.db-shm
 database/*.db-wal
 database/*.db-journal
+training/chatml_dataset.jsonl
+
+# Historical tracked adapters remain available, but new weights are not source.
+adapters/era_*/
 
 # OS / editor
 .DS_Store

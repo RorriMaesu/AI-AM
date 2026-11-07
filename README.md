@@ -1,178 +1,215 @@
 # AI-AM
 
-<p align="center">
-  <img src="images/AI_AM_logo.png" alt="AI-AM Logo" width="200" />
-</p>
+**Four functions. One history. One voice.**
 
-<p align="center"><strong>Support AI-AM</strong></p>
-<p align="center">
-  <a href="https://www.buymeacoffee.com/rorrimaesu">
-    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" width="150" />
-  </a>
-</p>
+AI-AM is a local cognitive agent inspired by the fourfold antahkarana:
+Manas, Chitta, Ahamkara, and Buddhi. It combines local language models with
+durable, source-linked memory and a shared working state.
 
-AI-AM is a local-first cognitive agent runtime that simulates a fourfold mind loop (Manas, Chitta, Ahamkara, Buddhi) with persistent memory, autonomous curiosity, optional sandboxed code execution, and a real-time web dashboard.
+Version 2 makes the four functions explicit. Each produces a validated
+structured result; Chitta is now an LLM-assisted memory function; Buddhi
+can request another retrieval or reconsideration before responding.
+The dashboard shows what each function contributed and which remembered
+events supported a decision.
 
-The system runs against a local Ollama-compatible chat-completions endpoint and exposes both a WebSocket UI stream and REST APIs for runtime control, including live model switching.
+This is an implementation of integrated cognition as a simulation.
+First-person language and an animated dashboard are not evidence of
+subjective experience.
 
-## Key Features
+## What works
 
-- Four-layer cognitive cycle:
-  - Manas: sensory-reactive impulse generation
-  - Chitta: GraphRAG memory retrieval from SQLite
-  - Ahamkara: identity-defense interpretation
-  - Buddhi: final synthesis and response
-- Persistent cognitive state in [config/engine_config.json](config/engine_config.json)
-- Local memory graph + imprint tracking in [database/db_manager.py](database/db_manager.py)
-- Real-time dashboard and telemetry in [ui/index.html](ui/index.html), [ui/app.js](ui/app.js), [ui/style.css](ui/style.css)
-- Runtime model switching from UI and API (Ollama tags)
-- Curiosity-triggered web search enrichment
-- Optional Docker sandbox execution for emitted Python tools
-- Nidra mode sleep-tuning pipeline with adapter era registry in [training/sleep_tune.py](training/sleep_tune.py)
+- **Manas:** observations, candidate interpretations, uncertainty, and attention.
+- **Chitta:** association and selection of retrieved memories with real record IDs.
+- **Ahamkara:** ownership of actions, capability limits, commitments, and continuity.
+- **Buddhi:** evidence-based response or a bounded request for more processing.
+- SQLite events, memories, correction links, and state that survive restarts.
+- Local retrieval without downloading an embedding model.
+- Separate records for statements, observations, inferences, reflections, and commitments.
+- Per-function model selection through a local Ollama server.
+- An offline dashboard for conversation, faculty traces, memories, and sources.
+- Explicit reflection, memory consolidation, pause/resume, and optional background work.
+- A bounded arithmetic calculator; displaying code never executes it.
+- A clearly labeled scripted demo using a separate database.
+- Tests that use disposable state rather than deleting the installation's memory.
 
-## Architecture Overview
+## Start on a drive with room
 
-- Runtime entrypoint: [core/orchestrator.py](core/orchestrator.py)
-- Web server: FastAPI on `http://localhost:8002`
-- Inference endpoint: configured in `llm_parameters.api_url` (default `http://localhost:11434/v1/chat/completions`)
-- Memory store: SQLite database at `database/chitta_store.db`
-- UI transport: WebSocket stream at `/ws` plus REST endpoints
+Requirements: Python 3.10 or newer; Ollama for live inference. Node 22 is
+used only for dashboard tests. No Docker, PyTorch, PEFT, or embedding
+package is required for the v2 runtime.
 
-### Main Runtime Flow
+Choose the installation and data directories before installing packages.
+The following PowerShell example keeps the project, environment, and caches
+on T:. Replace the paths with your preferred drive.
 
-1. Start loop and load state.
-2. Receive user input or autonomous reflection stimulus.
-3. Run Manas and Chitta in parallel.
-4. Run Ahamkara identity layer.
-5. Run Buddhi synthesis.
-6. Persist nodes/edges/samskaras to Chitta store.
-7. Update fatigue/arousal and broadcast state.
-8. Trigger Nidra mode when fatigue threshold is exceeded.
+```powershell
+git clone https://github.com/RorriMaesu/AI-AM.git T:\AI-AM
+Set-Location T:\AI-AM
 
-## API Endpoints
+$env:AIAM_DATA_DIR = 'T:\AIAMData'
+New-Item -ItemType Directory -Force -Path "$env:AIAM_DATA_DIR\cache\temp" | Out-Null
+$env:TEMP = "$env:AIAM_DATA_DIR\cache\temp"
+$env:TMP = $env:TEMP
+$env:PIP_CACHE_DIR = "$env:AIAM_DATA_DIR\cache\pip"
+$env:HF_HOME = "$env:AIAM_DATA_DIR\cache\huggingface"
+$env:PYTHONDONTWRITEBYTECODE = '1'
 
-- `GET /api/state`
-  - Returns current runtime state object.
-- `POST /api/input`
-  - Queues user prompt into the cognitive loop.
-- `GET /api/models`
-  - Returns installed Ollama tags and active model.
-- `POST /api/model/select`
-  - Validates and switches active model, persists config, attempts unload of previous model.
-- `POST /api/stop`
-  - Requests graceful runtime shutdown from UI/API, triggering the same cleanup lifecycle as terminal `shutdown`.
-- `WebSocket /ws`
-  - Streams `state_update`, `cycle_started`, `timeline_update`, `curiosity_search`, `sandbox_log`, shutdown events, and Nidra events.
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+```
 
-## Requirements
+The repository retains historical adapters for traceability. They are not
+loaded by this runtime. A sparse clone can omit the adapters directory if
+you want to avoid downloading those historical artifacts.
 
-- Windows environment (PowerShell scripts provided)
-- Python 3.10+
-- Ollama running on port 11434
-- A local Ollama model tag compatible with your configured prompts
+For a quick interface demonstration:
 
-Optional:
-- Docker (for sandbox tool execution)
-- PyTorch + Transformers + PEFT (for real sleep-tuning)
-- `sentence-transformers` or ONNX runtime + local ONNX files (for embeddings)
-- `duckduckgo_search` package (curiosity web search)
+```powershell
+.\start_mind.ps1 -Demo -DataDir T:\AIAMData
+```
 
-## Quick Start
+Open [http://localhost:8002](http://localhost:8002).
+The demo provider is deterministic sample behavior, not an LLM. Its banner
+remains visible, and its database is separate from live memories.
 
-1. Ensure Ollama is running on `localhost:11434`.
-2. Start runtime with [start_mind.ps1](start_mind.ps1).
-3. Open dashboard at `http://localhost:8002`.
-4. Stop runtime and reclaim VRAM with [stop_mind.ps1](stop_mind.ps1).
+For live use, start Ollama, install a model that fits your hardware, and set
+its exact installed tag in the configuration. AI-AM never pulls models
+automatically. Then run:
 
-## Model Switching
+```powershell
+.\start_mind.ps1 -DataDir T:\AIAMData
+```
 
-You can switch models at runtime from the UI model selector in the header or through API.
+The Python equivalent is:
 
-Expected behavior:
-- model list is fetched from Ollama `/api/tags`
-- selected model is validated
-- current model unload is requested
-- new model is persisted to state/config and used for subsequent calls
+```powershell
+python -B core/orchestrator.py --data-dir T:\AIAMData --port 8002
+```
 
-You can also stop the runtime directly from the UI using the Stop control in the header.
+Stop through the dashboard or:
 
-Expected stop behavior:
-- dashboard sends `POST /api/stop`
-- runtime marks shutdown as requested and begins graceful loop termination
-- UI enters a shutting-down state and disables interaction controls
-- WebSocket closes without reconnect retries once shutdown completes
+```powershell
+.\stop_mind.ps1 -Port 8002
+```
+
+The stop script requests shutdown of the identified AI-AM service. It does
+not kill unrelated Python processes or unload another application's Ollama model.
 
 ## Configuration
 
-Primary state/config file:
-- [config/engine_config.json](config/engine_config.json)
+The repository's `config/engine_config.json` contains configuration, not
+the evolving conversation. Live state is stored transactionally in the data
+directory. Set it with `--data-dir`, `AIAM_DATA_DIR`, or the launcher's
+`-DataDir` argument. The default is the repository's `data` directory.
 
-Important section:
-- `llm_parameters.model_name`
-- `llm_parameters.api_url`
-- `llm_parameters.num_ctx`
+Use the actual model tags reported by your local Ollama installation.
+Each role may select its own model, although sharing a single capable
+model is the economical starting point on one GPU.
 
-Note:
-This file is runtime-mutated frequently (heartbeat, workspace text, fatigue, etc.). Treat it carefully in commits.
+The important options are:
 
-## Testing
+| Option | Purpose |
+|---|---|
+| `api_url` | Local Ollama native chat endpoint, normally `http://127.0.0.1:11434/api/chat`. |
+| `roles` | Model and temperature settings for each of the four functions. |
+| `num_ctx` | Context budget; defaults to 8192. |
+| `max_output_tokens` | Bound for each role's generated output; defaults to 600. |
+| `max_rounds` | Bound on recurrence before the cycle must finish. |
+| `request_timeout` / `cycle_timeout` | Limits for inference and a complete cycle. |
+| `background_enabled` | Optional background reflection; disabled initially. |
+| `background_interval` | Minimum interval between background work opportunities. |
 
-Automated integration-style tests live in [tests/run_tests.py](tests/run_tests.py).
+Only loopback inference hosts and local model tags are accepted. The app
+does not browse the web autonomously. The dashboard's scripts, styles,
+and fonts do not depend on a CDN.
 
-The test suite covers:
-- Ollama reachability
-- sequential cycle execution
-- failover and reconnect handling
-- Nidra mode and adapter generation checks
-- curiosity and dreaming behavior checks
+A large context and several resident models increase memory demand.
+Measure latency and VRAM before increasing parallelism or model count.
 
-Run:
+## Memory and correction
 
-```bash
-python tests/run_tests.py
+The durable store records where a memory came from, when it was created,
+its kind, and its confidence. A user statement is evidence that the user
+said something; it is not automatically an independently verified fact.
+
+Corrections preserve history. A new memory can supersede an older memory
+by its ID, with references to the events supporting the correction.
+Default retrieval excludes superseded memories. Unsupported source IDs
+and invalid correction targets are rejected.
+
+Existing legacy memory tables are preserved and imported as explicitly
+unverified legacy records when present in the database being opened.
+They are not silently treated as verified observations. Back up an older
+installation's database before migration. See
+[the migration notes](docs/architecture.md#migration-and-recovery) for the
+distinction between an old database and the new default data directory.
+
+## Reflection and sleep
+
+Reflection can revisit an unresolved topic and submit evidence-linked
+proposals. It has a processing budget and can yield to user input.
+
+Consolidation currently performs deterministic memory housekeeping. The
+historical command name remains usable:
+
+```powershell
+python -B training/sleep_tune.py --data-dir T:\AIAMData
 ```
 
-## Training and Adapters
+Its JSON output explicitly reports `weights_trained: false` and
+`adapters_activated: false`. It does not manufacture weight files or
+declare a training success. Existing adapter artifacts are historical;
+there is no automatic weight-training or adapter-activation pipeline in v2.
 
-Sleep tuning is implemented in [training/sleep_tune.py](training/sleep_tune.py).
+## Verification
 
-Pipeline summary:
-1. extract high-arousal memory nodes
-2. build ChatML dataset at `training/chatml_dataset.jsonl`
-3. run PEFT LoRA training if dependencies are available
-4. fallback to simulated adapter artifact if training is unavailable
-5. register new era in `ancestry_ledger`
+Install the development dependencies, then run:
 
-Adapters are stored under `adapters/era_YYYYMMDD_HHMMSS`.
+```powershell
+python -B tests/run_tests.py --temp-dir T:\AIAMTestTemp --verbose
+node --test tests/ui.test.cjs
+```
 
-## UI Branding
+The runner creates a fresh child directory under the supplied temporary
+parent. It redirects runtime state and caches there, disables bytecode
+and pytest cache output, and removes only that disposable child afterward.
+It does not delete production configuration, databases, or logs.
 
-AI-AM branding and logo are integrated in the header.
+GitHub Actions runs Python tests on Linux and Windows with Python 3.10
+and 3.12, plus the dashboard's Node tests. These checks use mocked or
+scripted model responses; they do not measure live model intelligence,
+GPU performance, or consciousness.
 
-Logo source:
-- [images/AI_AM_logo.png](images/AI_AM_logo.png)
+For behavioral evaluation, compare against a normal assistant with
+retrieval at a similar token/time budget. Test correction after restart,
+source fidelity, agency attribution, uncertainty, failed action recovery,
+and each role's contribution when it is disabled. The
+[architecture and evaluation notes](docs/architecture.md) explain the design.
 
-## Repository Notes
+## API
 
-- Runtime/log/db/sandbox outputs are controlled through [.gitignore](.gitignore).
-- Large adapter artifacts can grow repository size quickly; consider curation or Git LFS strategy.
+The server binds to loopback. The dashboard uses a WebSocket at `/ws`
+and these HTTP routes:
 
-## Troubleshooting
-
-- If app exits unexpectedly:
-  - The orchestrator treats `exit` and `shutdown` as control commands when received as prompt input.
-- If you see pydantic field attribute warnings:
-  - These are non-fatal dependency-level warnings during startup.
-- If curiosity search warns about package rename:
-  - Migrate usage from `duckduckgo_search` to `ddgs` in a future update.
-- If model list is empty:
-  - Verify Ollama is running and API base in `llm_parameters.api_url` is correct.
-- If dashboard does not load assets:
-  - Ensure FastAPI static mounts are active and restart after static path changes.
-- If startup fails because port 8002 is busy:
-  - `start_mind.ps1` now detects and stops stale orchestrator instances bound to `8002`.
-  - If a non-orchestrator process owns `8002`, startup is aborted with a clear error to avoid unsafe process termination.
+| Route | Use |
+|---|---|
+| `GET /api/health` | Identify the local service. |
+| `GET /api/state` | Current shared state and runtime status. |
+| `GET /api/events` | Recent durable events. |
+| `GET /api/events/{event_id}` | Read a source event. |
+| `POST /api/input` | Queue a message: `{"text":"Hello"}`. |
+| `POST /api/retry` | Retry a failed event by ID. |
+| `GET /api/memories?query=...` | Retrieve relevant memories. |
+| `GET /api/memories/{memory_id}` | Inspect a memory and its provenance. |
+| `GET /api/models` | Installed local model tags and role assignments. |
+| `POST /api/model/select` | Select a model for a role or all roles. |
+| `POST /api/reflect` | Queue reflection on a topic. |
+| `POST /api/consolidate` | Consolidate stored memories. |
+| `POST /api/control` | Pause or resume. |
+| `POST /api/background` | Enable or disable background work. |
+| `POST /api/stop` | Request graceful shutdown. |
 
 ## License
 
-See [LICENSE](LICENSE).
+[Apache License 2.0](LICENSE).

@@ -1,660 +1,444 @@
-// app.js
-// Client-side controller for Project Antahkarana Dashboard UI
-
-let socket = null;
-let network = null;
-let nodesDataset = new vis.DataSet([]);
-let edgesDataset = new vis.DataSet([]);
-
-// DOM elements
-const statusDot = document.getElementById('connection-status');
-const stateBadge = document.getElementById('operational-state-badge');
-const arousalBar = document.getElementById('arousal-bar');
-const arousalVal = document.getElementById('arousal-val');
-const fatigueBar = document.getElementById('fatigue-bar');
-const fatigueVal = document.getElementById('fatigue-val');
-const curiosityBar = document.getElementById('curiosity-bar');
-const curiosityVal = document.getElementById('curiosity-val');
-const modelSelect = document.getElementById('model-select');
-const modelApplyBtn = document.getElementById('model-apply-btn');
-const runtimeStopBtn = document.getElementById('runtime-stop-btn');
-const modelStatus = document.getElementById('model-status');
-
-const chatMessages = document.getElementById('chat-messages');
-const chatForm = document.getElementById('chat-form');
-const chatInput = document.getElementById('chat-input');
-const sendBtn = document.getElementById('send-btn');
-
-const manasSlot = document.getElementById('telemetry-manas');
-const chittaSlot = document.getElementById('telemetry-chitta');
-const ahamkaraSlot = document.getElementById('telemetry-ahamkara');
-const buddhiSlot = document.getElementById('telemetry-buddhi');
-
-const sandboxConsole = document.getElementById('sandbox-console');
-const ledgerLogs = document.getElementById('ledger-logs');
-
-let knownModels = [];
-let activeModel = null;
-let shutdownRequested = false;
-let shutdownInFlight = false;
-
-function setInteractiveControlsEnabled(isEnabled) {
-    if (chatInput) {
-        chatInput.disabled = !isEnabled;
+/* AI-AM's observatory. No remote assets and no model text is interpreted as HTML. */
+(function (global) {
+  "use strict";
+  var ROLES = [
+    { id: "manas", name: "Manas", subtitle: "Attention & interpretation", symbol: "◌" },
+    { id: "chitta", name: "Chitta", subtitle: "Memory & association", symbol: "⟡" },
+    { id: "ahamkara", name: "Ahamkara", subtitle: "Identity & ownership", symbol: "◎" },
+    { id: "buddhi", name: "Buddhi", subtitle: "Judgment & direction", symbol: "◇" }
+  ];
+  function text(value) {
+    if (value === undefined || value === null) return "";
+    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function formatDuration(ms) {
+    if (!Number.isFinite(Number(ms)) || Number(ms) <= 0) return "—";
+    return Number(ms) < 1000 ? Math.round(Number(ms)) + " ms" : (Number(ms) / 1000).toFixed(1) + " s";
+  }
+  function shortId(value) { return String(value || "").slice(0, 8); }
+  function humanize(value) { return String(value || "").replace(/[_-]/g, " ").replace(/^\w/, function (letter) { return letter.toUpperCase(); }); }
+  function messageKind(value) {
+    return ["user", "assistant", "reflection", "error"].indexOf(value) >= 0 ? value : "system";
+  }
+  function tokenizeCode(value) {
+    var source = text(value), fence = String.fromCharCode(96).repeat(3), pattern = new RegExp(fence + "([\\w+-]*)\\s*\\n?([\\s\\S]*?)" + fence, "g");
+    var result = [], last = 0, match;
+    while ((match = pattern.exec(source)) !== null) {
+      if (match.index > last) result.push({ type: "text", content: source.slice(last, match.index) });
+      result.push({ type: "code", language: match[1] || "", content: match[2].replace(/\n$/, "") });
+      last = pattern.lastIndex;
     }
-    if (sendBtn) {
-        sendBtn.disabled = !isEnabled;
-    }
-    if (modelSelect) {
-        modelSelect.disabled = !isEnabled;
-    }
-    if (modelApplyBtn) {
-        modelApplyBtn.disabled = !isEnabled;
-    }
-    if (runtimeStopBtn) {
-        runtimeStopBtn.disabled = !isEnabled || shutdownInFlight;
-    }
-}
-
-function applyShutdownState(message) {
-    if (shutdownRequested) return;
-
-    shutdownRequested = true;
-    setInteractiveControlsEnabled(false);
-    stateBadge.textContent = 'Shutting Down';
-    stateBadge.className = 'state-badge badge-stopping';
-    appendLedgerLog('system', message || 'Graceful shutdown requested. Stopping runtime loops...');
-
-    const shutdownNotice = document.createElement('div');
-    shutdownNotice.className = 'system-message';
-    shutdownNotice.textContent = 'Shutdown in progress. Runtime controls are disabled.';
-    chatMessages.appendChild(shutdownNotice);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-// Initialize Vis.js Graph visualizer
-function initNetwork() {
-    const container = document.getElementById('memory-graph-container');
-    const data = {
-        nodes: nodesDataset,
-        edges: edgesDataset
-    };
-    const options = {
-        nodes: {
-            shape: 'dot',
-            size: 16,
-            font: {
-                color: '#f8fafc',
-                size: 12,
-                face: 'Outfit'
-            },
-            borderWidth: 2,
-            shadow: true
-        },
-        edges: {
-            width: 2,
-            color: { color: '#475569', highlight: '#06b6d4', hover: '#06b6d4' },
-            arrows: {
-                to: { enabled: true, scaleFactor: 0.5 }
-            },
-            smooth: {
-                enabled: true,
-                type: 'dynamic',
-                roundness: 0.5
-            }
-        },
-        physics: {
-            barnesHut: {
-                gravitationalConstant: -2000,
-                centralGravity: 0.3,
-                springLength: 95,
-                springConstant: 0.04,
-                damping: 0.09,
-                avoidOverlap: 1
-            },
-            stabilization: { iterations: 150, updateInterval: 25 }
-        },
-        interaction: {
-            hover: true,
-            tooltipDelay: 200
-        }
-    };
-    network = new vis.Network(container, data, options);
-}
-
-// WebSocket Connection Management
-function connectWebSocket() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    
-    appendLedgerLog('system', 'Attempting WebSocket connection...');
-    socket = new WebSocket(wsUrl);
-
-    socket.onopen = () => {
-        statusDot.className = 'status-dot dot-online';
-        appendLedgerLog('system', 'WebSocket connection established.');
-    };
-
-    socket.onclose = () => {
-        statusDot.className = 'status-dot dot-offline';
-        if (shutdownRequested) {
-            appendLedgerLog('system', 'Runtime stopped. WebSocket session closed after shutdown.');
-            stateBadge.textContent = 'Stopped';
-            stateBadge.className = 'state-badge badge-stopping';
-            return;
-        }
-
-        appendLedgerLog('failover', 'WebSocket connection closed. Retrying in 3 seconds...');
-        setTimeout(connectWebSocket, 3000);
-    };
-
-    socket.onerror = (error) => {
-        statusDot.className = 'status-dot dot-offline';
-        appendLedgerLog('failover', 'WebSocket error encountered: ' + error.message);
-    };
-
-    socket.onmessage = (event) => {
-        try {
-            const payload = JSON.parse(event.data);
-            handleServerEvent(payload);
-        } catch (err) {
-            console.error('Failed to parse WebSocket message:', err);
-        }
-    };
-}
-
-// Parse server events and update UI panels
-function handleServerEvent(event) {
-    const { type, data, timestamp } = event;
-    
-    switch (type) {
-        case 'state_update':
-            updateMetacognition(data);
-            syncModelFromState(data);
-            break;
-            
-        case 'cycle_started':
-            startCycleUpdate(data);
-            break;
-            
-        case 'timeline_update':
-            updateTimelineSlot(data.layer, data.content);
-            break;
-            
-        case 'curiosity_search':
-            handleCuriositySearch(data);
-            break;
-            
-        case 'sandbox_log':
-            handleSandboxExecution(data);
-            break;
-            
-        case 'nidra_triggered':
-            handleNidraStatus('sleep', data);
-            break;
-            
-        case 'nidra_completed':
-            handleNidraStatus('wake', data);
-            break;
-
-        case 'shutdown_initiated':
-            applyShutdownState('Graceful shutdown initiated by runtime controller.');
-            break;
-            
-        default:
-            console.log('Unhandled event type:', type);
-    }
-}
-
-function setModelStatus(text, isError = false) {
-    if (!modelStatus) return;
-    modelStatus.textContent = text;
-    modelStatus.style.color = isError ? '#f87171' : '#94a3b8';
-}
-
-function renderModelOptions(models, selectedModel) {
-    if (!modelSelect) return;
-    modelSelect.innerHTML = '';
-
-    if (!models || models.length === 0) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No models found';
-        modelSelect.appendChild(option);
-        modelSelect.disabled = true;
-        if (modelApplyBtn) {
-            modelApplyBtn.disabled = true;
-        }
-        return;
-    }
-
-    modelSelect.disabled = false;
-    models.forEach((model) => {
-        const option = document.createElement('option');
-        option.value = model;
-        option.textContent = model;
-        modelSelect.appendChild(option);
+    if (last < source.length || !result.length) result.push({ type: "text", content: source.slice(last) });
+    return result;
+  }
+  function renderText(container, value, doc) {
+    doc = doc || document;
+    tokenizeCode(value).forEach(function (part) {
+      if (part.type === "text") { container.appendChild(doc.createTextNode(part.content)); return; }
+      var pre = doc.createElement("pre");
+      if (part.language) {
+        var label = doc.createElement("span"); label.className = "code-label"; label.textContent = part.language; pre.appendChild(label);
+      }
+      var code = doc.createElement("code"); code.textContent = part.content; pre.appendChild(code); container.appendChild(pre);
     });
+  }
+  function mergeEvents(existing, incoming) {
+    var byId = new Map();
+    existing.concat(incoming).forEach(function (event) { if (event && typeof event.id === "string") byId.set(event.id, event); });
+    return Array.from(byId.values()).sort(function (a, b) { return String(a.created_at || "").localeCompare(String(b.created_at || "")); });
+  }
+  function facultyStatus(role, state, completed) {
+    if (state && state.active_role === role && state.status === "thinking") return "active";
+    return completed ? "complete" : "waiting";
+  }
+  function modelName(role, fallback) {
+    return typeof role === "string" ? role : ((role && role.model) || fallback || "");
+  }
+  function extractEvidence(event) {
+    var meta = (event && event.metadata) || {};
+    var ids = meta.evidence_ids || (meta.decision && meta.decision.evidence_ids) || meta.source_event_ids || [];
+    return Array.isArray(ids) ? Array.from(new Set(ids.filter(function (id) { return typeof id === "string" && id.length > 0; }))) : [];
+  }
+  var helpers = { tokenizeCode: tokenizeCode, renderText: renderText, formatDuration: formatDuration, messageKind: messageKind, mergeEvents: mergeEvents, facultyStatus: facultyStatus, modelName: modelName, extractEvidence: extractEvidence };
+  if (typeof module !== "undefined" && module.exports) module.exports = helpers;
+  if (typeof document === "undefined") return;
 
-    if (selectedModel && models.includes(selectedModel)) {
-        modelSelect.value = selectedModel;
-    }
-
-    if (modelApplyBtn) {
-        modelApplyBtn.disabled = false;
-    }
-}
-
-function syncModelFromState(state) {
-    const runtimeModel = state?.llm_parameters?.model_name;
-    if (!runtimeModel) return;
-
-    activeModel = runtimeModel;
-    if (modelSelect && knownModels.includes(runtimeModel)) {
-        modelSelect.value = runtimeModel;
-    }
-    setModelStatus(`Active: ${runtimeModel}`);
-}
-
-async function loadModelInventory() {
-    if (!modelSelect || !modelApplyBtn) return;
-
-    modelApplyBtn.disabled = true;
-    setModelStatus('Loading model tags...');
-
-    try {
-        const response = await fetch('/api/models');
-        const payload = await response.json();
-        if (!response.ok) {
-            throw new Error(payload?.message || `HTTP ${response.status}`);
-        }
-
-        knownModels = Array.isArray(payload.models) ? payload.models : [];
-        activeModel = payload.active_model || null;
-        renderModelOptions(knownModels, activeModel);
-
-        if (activeModel) {
-            setModelStatus(`Active: ${activeModel}`);
-        } else {
-            setModelStatus('Active model unknown');
-        }
-    } catch (error) {
-        renderModelOptions([], null);
-        setModelStatus(`Model load failed: ${error.message}`, true);
-        appendLedgerLog('failover', `Failed to load models from backend: ${error.message}`);
-    }
-}
-
-async function applySelectedModel() {
-    if (!modelSelect || !modelApplyBtn) return;
-    if (shutdownRequested) return;
-    const requestedModel = modelSelect.value;
-    if (!requestedModel) return;
-
-    modelApplyBtn.disabled = true;
-    setModelStatus(`Switching to ${requestedModel}...`);
-
-    try {
-        const response = await fetch('/api/model/select', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ model: requestedModel })
+  var $ = function (id) { return document.getElementById(id); };
+  var state = {}, events = [], eventNodes = new Map(), memories = new Map(), roleResults = {}, models = [], socket = null;
+  var reconnectTimer = null, reconnectAttempts = 0, memoryTimer = null, toastTimer = null, searchSequence = 0, stopped = false;
+  var refreshFlight = null, isSending = false;
+  function el(tag, className, content) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (content !== undefined) node.textContent = text(content);
+    return node;
+  }
+  function clear(node) { node.replaceChildren(); }
+  function announce(message, error) {
+    if (error) { $("alert-message").textContent = text(message); $("alert-banner").hidden = false; return; }
+    $("toast").textContent = text(message); $("toast").hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { $("toast").hidden = true; }, 5500);
+  }
+  async function api(path, body) {
+    var options = { credentials: "same-origin", headers: { Accept: "application/json" } };
+    if (body !== undefined) { options.method = "POST"; options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(body); }
+    var response;
+    try { response = await fetch(path, options); }
+    catch (error) { throw new Error("The local runtime is unavailable. Start AI-AM, then reconnect."); }
+    var data = await response.json().catch(function () { return {}; });
+    if (!response.ok) throw new Error(text(data.detail || data.error || ("Request failed (" + response.status + ").")));
+    return data;
+  }
+  function setConnection(connected) {
+    $("connection-status").className = "connection " + (connected ? "connected" : "disconnected");
+    $("connection-label").textContent = connected ? "Connected locally" : "Reconnecting";
+    $("connection-status").setAttribute("aria-label", connected ? "Connected to local runtime" : "Disconnected, trying to reconnect");
+  }
+  function timeLabel(value) {
+    var date = new Date(value); return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  function createFaculties() {
+    ROLES.forEach(function (role) {
+      var card = el("details", "faculty-card"); card.dataset.role = role.id; card.id = "faculty-" + role.id;
+      var summary = el("summary");
+      summary.appendChild(el("span", "faculty-symbol", role.symbol));
+      var labels = el("span"); labels.appendChild(el("span", "faculty-name", role.name)); labels.appendChild(el("span", "faculty-subtitle", role.subtitle));
+      summary.appendChild(labels);
+      var indicator = el("span", "faculty-indicator"); indicator.setAttribute("aria-label", "Waiting"); summary.appendChild(indicator);
+      card.appendChild(summary);
+      var result = el("div", "faculty-result", "A contribution will appear here when this faculty is used."); result.id = "result-" + role.id;
+      card.appendChild(result); $("faculty-list").appendChild(card);
+    });
+  }
+  function renderResult(role, value, elapsed) {
+    var target = $("result-" + role); if (!target) return;
+    clear(target);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      Object.entries(value).forEach(function (entry) {
+        if (entry[1] === undefined || entry[1] === null || (Array.isArray(entry[1]) && !entry[1].length)) return;
+        target.appendChild(el("div", "result-label", humanize(entry[0])));
+        target.appendChild(el("p", "", text(entry[1])));
+      });
+    } else target.appendChild(el("p", "", text(value)));
+    if (!target.childNodes.length) target.appendChild(el("p", "", "No additional information was needed."));
+    if (elapsed !== undefined) target.appendChild(el("div", "faculty-timing", "Completed in " + formatDuration(elapsed)));
+  }
+  function setRoleAppearance() {
+    ROLES.forEach(function (role) {
+      var status = facultyStatus(role.id, state, Object.prototype.hasOwnProperty.call(roleResults, role.id));
+      var card = $("faculty-" + role.id);
+      card.className = "faculty-card " + status;
+      card.querySelector(".faculty-indicator").setAttribute("aria-label", humanize(status));
+      var orbit = document.querySelector('[data-orbit-role="' + role.id + '"]');
+      orbit.classList.toggle("active", status === "active");
+    });
+  }
+  function listSection(container, title, items) {
+    if (!Array.isArray(items) || !items.length) return;
+    container.appendChild(el("div", "small-label", title));
+    var list = el("ul");
+    items.forEach(function (item) { list.appendChild(el("li", "", typeof item === "object" ? (item.content || item.description || item.text || text(item)) : item)); });
+    container.appendChild(list);
+  }
+  function renderState(next) {
+    var previousCycle = state.cycle;
+    state = next || {};
+    if (previousCycle !== state.cycle && state.status === "thinking") { roleResults = {}; ROLES.forEach(function (role) { renderResult(role.id, "Waiting for this faculty."); }); }
+    var self = state.self_model || {}, meta = state.metrics || {}, workspace = state.workspace || {};
+    $("identity-name").textContent = self.name || "AI-AM";
+    $("identity-description").textContent = self.description || "Four cooperating faculties, one shared history.";
+    $("mind-status").textContent = humanize(state.status || "idle");
+    $("cycle-count").textContent = "#" + String(state.cycle || 0).padStart(3, "0");
+    $("state-version").textContent = "STATE " + (state.state_version || 0);
+    $("memory-count").textContent = String((state.memory_stats || {}).active_memories || 0);
+    $("metric-tokens").textContent = Number(meta.tokens || 0).toLocaleString();
+    $("metric-latency").textContent = formatDuration(meta.latency_ms);
+    $("metric-errors").textContent = String(meta.errors || 0);
+    $("demo-banner").hidden = state.backend !== "demo";
+    $("backend-label").textContent = state.backend === "demo" ? "Scripted demo · durable memory" : "Local inference · durable memory";
+    var paused = state.status === "paused" || state.paused === true;
+    $("pause-button").textContent = paused ? "Resume" : "Pause";
+    $("pause-button").disabled = state.status === "stopped";
+    $("background-toggle").checked = !!state.background_enabled;
+    $("thinking-strip").hidden = state.status !== "thinking";
+    $("thinking-label").textContent = state.active_role ? humanize(state.active_role) + " is contributing" : "Integrating the shared perspective";
+    $("session-indicator").textContent = paused ? "Processing paused" : (state.status === "thinking" ? "A response is taking shape" : "Continuity preserved");
+    $("composer-hint").textContent = paused ? "Messages will wait until you resume" : "Ctrl / ⌘ + Enter to send";
+    $("send-button").disabled = stopped || state.status === "stopped" || isSending;
+    clear($("self-details"));
+    listSection($("self-details"), "CAPABILITIES", self.capabilities);
+    listSection($("self-details"), "COMMITMENTS", self.commitments);
+    listSection($("self-details"), "ACTIVE GOALS", state.goals);
+    if (!$("self-details").childNodes.length) $("self-details").appendChild(el("p", "muted", "The self-model will develop through recorded interactions."));
+    var current = state.current_event;
+    $("attention-text").textContent = typeof current === "object" && current ? (current.content || current.text || "Integrating the current observation.") : (current ? String(current) : "Waiting for an observation.");
+    clear($("uncertainty-list"));
+    (Array.isArray(workspace.uncertainties) ? workspace.uncertainties : []).slice(0, 4).forEach(function (item) { $("uncertainty-list").appendChild(el("span", "uncertainty-tag", typeof item === "string" ? item : text(item))); });
+    var restored = {
+      manas: workspace.manas || ((workspace.observations || []).length ? { observations: workspace.observations, interpretations: workspace.interpretations || [] } : null),
+      chitta: workspace.chitta || ((workspace.memories || []).length ? { memories: workspace.memories } : null),
+      ahamkara: workspace.ahamkara || workspace.self_assessment,
+      buddhi: workspace.buddhi || workspace.decision
+    };
+    ROLES.forEach(function (role) {
+      var value = restored[role.id];
+      if (value && Object.keys(value).length && !roleResults[role.id]) { roleResults[role.id] = value; renderResult(role.id, value); }
+    });
+    setRoleAppearance();
+  }
+  function sourceButton(id, label, type) {
+    var button = el("button", "evidence-link", label || shortId(id)); button.type = "button";
+    button.title = id;
+    button.addEventListener("click", function () { showSource(id, type); });
+    return button;
+  }
+  function createMessage(event) {
+    var kind = messageKind(event.kind), article = el("article", "message " + kind);
+    article.dataset.eventId = event.id;
+    var header = el("div", "message-header");
+    header.appendChild(el("span", "message-avatar", kind === "assistant" ? "◉" : (kind === "reflection" ? "◇" : (kind === "error" ? "!" : "↗"))));
+    header.appendChild(el("span", "", kind === "assistant" ? "AI-AM" : kind === "user" ? "You" : humanize(kind)));
+    var time = el("time", "", timeLabel(event.created_at)); if (event.created_at) time.dateTime = event.created_at; header.appendChild(time);
+    article.appendChild(header);
+    var content = el("div", "message-content"); renderText(content, event.content); article.appendChild(content);
+    if (["pending", "queued", "processing", "failed"].indexOf(event.status) >= 0) {
+      var status = el("div", "message-status " + (event.status === "failed" ? "failed" : ""));
+      status.appendChild(el("span", "", event.status === "failed" ? "This interaction needs another attempt." : (event.status === "processing" ? "Being considered" : "Waiting to be considered")));
+      if (event.status === "failed") {
+        var retry = el("button", "retry-button", "Retry"); retry.type = "button";
+        retry.addEventListener("click", async function () {
+          retry.disabled = true;
+          try { await api("/api/retry", { event_id: event.id }); await refresh(); announce("The interaction is queued again."); }
+          catch (error) { announce(error.message, true); retry.disabled = false; }
         });
-        const payload = await response.json();
-        if (!response.ok || payload.status !== 'ok') {
-            throw new Error(payload?.message || `HTTP ${response.status}`);
-        }
-
-        activeModel = payload.active_model || requestedModel;
-        setModelStatus(`Active: ${activeModel}`);
-        appendLedgerLog('system', `Model switched to '${activeModel}'.`);
-
-        if (payload.warning) {
-            appendLedgerLog('failover', payload.warning);
-        }
-
-        await loadModelInventory();
-    } catch (error) {
-        setModelStatus(`Switch failed: ${error.message}`, true);
-        appendLedgerLog('failover', `Model switch failed: ${error.message}`);
-    } finally {
-        modelApplyBtn.disabled = false;
+        status.appendChild(retry);
+        var error = (event.metadata || {}).error;
+        if (error) status.title = text(error);
+      }
+      article.appendChild(status);
     }
-}
-
-async function requestRuntimeStop() {
-    if (!runtimeStopBtn || shutdownInFlight || shutdownRequested) return;
-
-    shutdownInFlight = true;
-    runtimeStopBtn.disabled = true;
-    applyShutdownState('Requesting graceful shutdown from dashboard...');
-
+    var evidence = extractEvidence(event);
+    if (evidence.length) {
+      var links = el("div", "evidence-links");
+      evidence.forEach(function (id, index) { links.appendChild(sourceButton(id, "Source " + (index + 1), "auto")); });
+      article.appendChild(links);
+    }
+    return article;
+  }
+  function renderEvents(next) {
+    events = mergeEvents(events, Array.isArray(next) ? next : []);
+    var conversation = $("conversation"), nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 110;
+    var visible = events.filter(function (event) { return messageKind(event.kind) !== "system"; });
+    $("welcome").hidden = visible.length > 0;
+    var changed = false;
+    visible.forEach(function (event) {
+      var signature = JSON.stringify(event), previous = eventNodes.get(event.id);
+      if (previous && previous.signature === signature) return;
+      var node = createMessage(event);
+      if (previous) previous.node.replaceWith(node); else conversation.appendChild(node);
+      eventNodes.set(event.id, { node: node, signature: signature }); changed = true;
+    });
+    if (changed) {
+      if (nearBottom) conversation.scrollTop = conversation.scrollHeight; else $("new-messages").hidden = false;
+    }
+  }
+  async function refresh() {
+    if (refreshFlight) return refreshFlight;
+    refreshFlight = Promise.all([api("/api/state"), api("/api/events?limit=100")]).then(function (values) {
+      renderState(values[0]); renderEvents(values[1].events || []);
+    }).finally(function () { refreshFlight = null; });
+    return refreshFlight;
+  }
+  async function loadMemories() {
+    var sequence = ++searchSequence, query = $("memory-search").value.trim();
     try {
-        const response = await fetch('/api/stop', { method: 'POST' });
-        const payload = await response.json();
-        if (!response.ok) {
-            throw new Error(payload?.message || `HTTP ${response.status}`);
-        }
-
-        appendLedgerLog('system', payload.message || 'Graceful shutdown acknowledged by backend.');
+      var data = await api("/api/memories?query=" + encodeURIComponent(query));
+      if (sequence !== searchSequence) return;
+      clear($("memory-list"));
+      var list = data.memories || [];
+      list.forEach(function (memory) {
+        memories.set(memory.id, memory);
+        var card = el("button", "memory-card"); card.type = "button";
+        var meta = el("div", "memory-meta"); meta.appendChild(el("span", "", humanize(memory.kind))); meta.appendChild(el("span", "", shortId(memory.id)));
+        card.appendChild(meta); card.appendChild(el("p", "memory-preview", memory.content));
+        card.addEventListener("click", function () { showRecord(memory, "memory"); }); $("memory-list").appendChild(card);
+      });
+      if (!list.length) $("memory-list").appendChild(el("p", "empty-note", query ? "No relevant memory was found." : "Experiences will appear here as the mind learns from your conversation."));
     } catch (error) {
-        appendLedgerLog('failover', `Shutdown request failed: ${error.message}`);
-    } finally {
-        shutdownInFlight = false;
+      if (sequence === searchSequence) { clear($("memory-list")); $("memory-list").appendChild(el("p", "empty-note", "Memory is temporarily unavailable.")); }
     }
-}
-
-// Update metacognition gauges and configuration values
-function updateMetacognition(state) {
-    if (!state || !state.metacognition) return;
-    
-    const meta = state.metacognition;
-    const arousal = meta.arousal_index || 0.0;
-    const fatigue = meta.mental_fatigue || 0.0;
-    const curiosity = meta.curiosity_index || 0.0;
-    const opState = meta.operational_state || 'Idle';
-
-    // Update state badge class
-    stateBadge.textContent = opState;
-    if (opState.toLowerCase().includes('waking') || opState.toLowerCase().includes('pramana')) {
-        stateBadge.className = 'state-badge badge-waking';
-    } else if (opState.toLowerCase().includes('dreaming') || opState.toLowerCase().includes('vikalpa')) {
-        stateBadge.className = 'state-badge badge-dreaming';
-    } else {
-        stateBadge.className = 'state-badge badge-sleeping';
-    }
-
-    // Update progress bars
-    arousalBar.style.width = `${arousal * 100}%`;
-    arousalVal.textContent = arousal.toFixed(2);
-    
-    fatigueBar.style.width = `${fatigue * 100}%`;
-    fatigueVal.textContent = fatigue.toFixed(2);
-    
-    curiosityBar.style.width = `${curiosity * 100}%`;
-    curiosityVal.textContent = curiosity.toFixed(2);
-}
-
-// Start visual sequence of a cognitive cycle
-function startCycleUpdate(data) {
-    const { heartbeat_id, stimulus, operational_state, arousal_index, mental_fatigue, curiosity_index } = data;
-    
-    // Reset slot classes & values
-    document.querySelectorAll('.telemetry-slot').forEach(slot => {
-        slot.className = slot.className.split(' ').filter(c => !c.startsWith('active-')).join(' ');
+  }
+  function openDialog(dialog) { if (!dialog.open) dialog.showModal(); }
+  function showRecord(record, type) {
+    $("detail-title").textContent = type === "memory" ? "A recorded experience" : "The original event";
+    clear($("detail-body"));
+    var dl = el("dl");
+    [["Kind", humanize(record.kind)], ["Source", record.source], ["Recorded", record.created_at ? new Date(record.created_at).toLocaleString() : ""], ["Record ID", record.id]].forEach(function (item) {
+      if (!item[1]) return; dl.appendChild(el("dt", "", item[0])); dl.appendChild(el("dd", "", item[1]));
     });
-    
-    manasSlot.textContent = "Sensory processing active...";
-    manasSlot.className = "slot-content empty-content";
-    
-    chittaSlot.textContent = "Memory matrix searching...";
-    chittaSlot.className = "slot-content empty-content";
-    
-    ahamkaraSlot.textContent = "Identity filtering active...";
-    ahamkaraSlot.className = "slot-content empty-content";
-    
-    buddhiSlot.textContent = "Executive resolution active...";
-    buddhiSlot.className = "slot-content empty-content";
-
-    // Update metrics bar values immediately
-    updateMetacognition({
-        metacognition: {
-            operational_state,
-            arousal_index,
-            mental_fatigue,
-            curiosity_index
+    if (record.confidence !== undefined) { dl.appendChild(el("dt", "", "Confidence")); dl.appendChild(el("dd", "", Math.round(Number(record.confidence) * 100) + "% · recorded estimate")); }
+    if (record.supersedes) { dl.appendChild(el("dt", "", "Corrects")); var dd = el("dd"); dd.appendChild(sourceButton(record.supersedes, shortId(record.supersedes), "memory")); dl.appendChild(dd); }
+    $("detail-body").appendChild(dl);
+    var content = el("div", "source-content"); renderText(content, record.content); $("detail-body").appendChild(content);
+    if (Array.isArray(record.source_event_ids) && record.source_event_ids.length) {
+      $("detail-body").appendChild(el("p", "small-label", "ORIGINAL SOURCES"));
+      var links = el("div", "evidence-links");
+      record.source_event_ids.forEach(function (id, index) { links.appendChild(sourceButton(id, "Event " + (index + 1) + " · " + shortId(id), "event")); });
+      $("detail-body").appendChild(links);
+    }
+    openDialog($("detail-dialog"));
+  }
+  async function showSource(id, type) {
+    try {
+      if (type !== "event" && memories.has(id)) { showRecord(memories.get(id), "memory"); return; }
+      var event = events.find(function (item) { return item.id === id; });
+      if (type !== "memory" && event) { showRecord(event, "event"); return; }
+      var record;
+      if (type === "memory") { record = await api("/api/memories/" + encodeURIComponent(id)); showRecord(record.memory || record, "memory"); }
+      else if (type === "event") { record = await api("/api/events/" + encodeURIComponent(id)); showRecord(record.event || record, "event"); }
+      else {
+        try { record = await api("/api/memories/" + encodeURIComponent(id)); showRecord(record.memory || record, "memory"); }
+        catch (_) { record = await api("/api/events/" + encodeURIComponent(id)); showRecord(record.event || record, "event"); }
+      }
+    } catch (error) { announce("The source record could not be opened: " + error.message, true); }
+  }
+  function connect() {
+    if (stopped) return;
+    var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(protocol + "//" + location.host + "/ws");
+    socket.addEventListener("open", function () {
+      reconnectAttempts = 0; setConnection(true);
+      refresh().catch(function (error) { announce(error.message, true); }); loadMemories();
+    });
+    socket.addEventListener("message", function (message) {
+      var event; try { event = JSON.parse(message.data); } catch (_) { return; }
+      var data = event.data || {};
+      if (event.type === "state" || event.type === "state_update") renderState(data);
+      if (event.type === "role_started") {
+        state.status = "thinking"; state.active_role = data.role;
+        $("thinking-strip").hidden = false;
+        $("thinking-label").textContent = humanize(data.role) + " is contributing";
+        $("thinking-round").textContent = data.round ? "ROUND " + data.round : "";
+        setRoleAppearance();
+      }
+      if (event.type === "role_completed") {
+        roleResults[data.role] = data.result || {}; renderResult(data.role, data.result, data.elapsed_ms);
+        state.active_role = null; setRoleAppearance();
+      }
+      if (event.type === "cycle_completed") {
+        if (data.state) renderState(data.state);
+        refresh().catch(function (error) { announce(error.message, true); }); loadMemories();
+      }
+      if (event.type === "memory_updated") { loadMemories(); refresh().catch(function () {}); }
+      if (event.type === "error") {
+        announce(data.message || data.error || "The runtime could not complete this interaction. You can retry it.", true);
+        refresh().catch(function () {});
+      }
+    });
+    socket.addEventListener("close", function () {
+      setConnection(false);
+      if (!stopped) {
+        var delay = Math.min(15000, 800 * Math.pow(1.6, reconnectAttempts++));
+        clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, delay);
+      }
+    });
+    socket.addEventListener("error", function () { setConnection(false); });
+  }
+  async function loadModels() {
+    $("models-status").textContent = "Loading installed models…"; $("save-models").disabled = true;
+    try {
+      var data = await api("/api/models"); models = data.models || [];
+      clear($("model-fields"));
+      ROLES.forEach(function (role) {
+        var field = el("div", "model-field"), label = el("label", "", role.name); label.htmlFor = "model-" + role.id;
+        var select = el("select"); select.id = "model-" + role.id; select.name = role.id;
+        var selected = modelName((data.roles || state.roles || {})[role.id], state.model);
+        var names = models.slice(); if (selected && names.indexOf(selected) < 0) names.unshift(selected);
+        if (!names.length) { var option = el("option", "", "No model available"); option.value = ""; select.appendChild(option); }
+        names.forEach(function (name) { var option = el("option", "", name + (models.indexOf(name) < 0 ? " (not installed)" : "")); option.value = name; select.appendChild(option); });
+        select.value = selected || names[0] || ""; field.appendChild(label); field.appendChild(select); $("model-fields").appendChild(field);
+      });
+      $("models-status").textContent = data.error ? text(data.error) : models.length ? models.length + " installed model" + (models.length === 1 ? "" : "s") + ". Changes apply between cognitive cycles." : "No local models found. Start Ollama and install a model, then refresh.";
+      $("save-models").disabled = !models.length;
+    } catch (error) { $("models-status").textContent = error.message; }
+  }
+  function resizeComposer() { $("message-input").rows = Math.min(6, Math.max(1, $("message-input").value.split("\n").length)); }
+  function bindControls() {
+    $("composer").addEventListener("submit", async function (event) {
+      event.preventDefault(); var value = $("message-input").value.trim(); if (!value || isSending || stopped) return;
+      isSending = true; $("send-button").disabled = true;
+      try {
+        var queued = await api("/api/input", { text: value }); queued = queued.event || queued;
+        if (queued.id) renderEvents([queued]);
+        $("message-input").value = ""; resizeComposer(); await refresh();
+        $("conversation").scrollTop = $("conversation").scrollHeight;
+      } catch (error) { announce(error.message, true); }
+      finally { isSending = false; $("send-button").disabled = state.status === "stopped"; $("message-input").focus(); }
+    });
+    $("message-input").addEventListener("input", resizeComposer);
+    $("message-input").addEventListener("keydown", function (event) { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); $("composer").requestSubmit(); } });
+    document.querySelectorAll("[data-prompt]").forEach(function (button) {
+      button.addEventListener("click", function () { $("message-input").value = button.dataset.prompt; resizeComposer(); $("message-input").focus(); });
+    });
+    $("pause-button").addEventListener("click", async function () {
+      var button = $("pause-button"); button.disabled = true;
+      try { await api("/api/control", { action: state.status === "paused" || state.paused ? "resume" : "pause" }); await refresh(); }
+      catch (error) { announce(error.message, true); }
+      finally { button.disabled = state.status === "stopped"; }
+    });
+    $("background-toggle").addEventListener("change", async function () {
+      var desired = $("background-toggle").checked; $("background-toggle").disabled = true;
+      try { await api("/api/background", { enabled: desired }); await refresh(); announce(desired ? "Background reflection enabled." : "Background reflection paused."); }
+      catch (error) { $("background-toggle").checked = !desired; announce(error.message, true); }
+      finally { $("background-toggle").disabled = false; }
+    });
+    $("reflect-button").addEventListener("click", function () { openDialog($("reflect-dialog")); $("reflect-topic").focus(); });
+    $("reflect-form").addEventListener("submit", async function (event) {
+      event.preventDefault(); var button = event.submitter; if (button) button.disabled = true;
+      try { await api("/api/reflect", { topic: $("reflect-topic").value.trim() }); $("reflect-dialog").close(); $("reflect-topic").value = ""; await refresh(); announce("Reflection queued."); }
+      catch (error) { announce(error.message, true); }
+      finally { if (button) button.disabled = false; }
+    });
+    $("consolidate-button").addEventListener("click", async function () {
+      var button = $("consolidate-button"); button.disabled = true;
+      try { var result = await api("/api/consolidate", {}); await Promise.all([refresh(), loadMemories()]); announce(result.message || "Memory consolidation completed. Original experiences are preserved."); }
+      catch (error) { announce(error.message, true); }
+      finally { button.disabled = false; }
+    });
+    $("memory-search").addEventListener("input", function () { clearTimeout(memoryTimer); memoryTimer = setTimeout(loadMemories, 250); });
+    $("models-button").addEventListener("click", function () { openDialog($("models-dialog")); loadModels(); });
+    $("refresh-models").addEventListener("click", loadModels);
+    $("models-form").addEventListener("submit", async function (event) {
+      event.preventDefault(); $("save-models").disabled = true;
+      try {
+        for (var role of ROLES) {
+          var selected = $("model-" + role.id).value;
+          if (!selected || models.indexOf(selected) < 0) throw new Error("Select an installed model for " + role.name + ".");
         }
-    });
-
-    // Append system message to chat loop
-    const systemDiv = document.createElement('div');
-    systemDiv.className = 'system-message';
-    systemDiv.textContent = `Heartbeat #${heartbeat_id} | State: ${operational_state}`;
-    chatMessages.appendChild(systemDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-
-    // Append user message if it is not subconscious reflection
-    if (stimulus && !stimulus.startsWith('[Subconscious Stream')) {
-        appendChatBubble('user', stimulus);
-    }
-    
-    appendLedgerLog('normal', `Heartbeat #${heartbeat_id} initialized. Stimulus: ${stimulus.substring(0, 45)}...`);
-}
-
-// Bind live text streams to specific slot panels
-function updateTimelineSlot(layer, content) {
-    const slotMap = {
-        'manas': { slot: manasSlot, parent: manasSlot.parentElement, activeClass: 'active-manas' },
-        'chitta': { slot: chittaSlot, parent: chittaSlot.parentElement, activeClass: 'active-chitta' },
-        'ahamkara': { slot: ahamkaraSlot, parent: ahamkaraSlot.parentElement, activeClass: 'active-ahamkara' },
-        'buddhi': { slot: buddhiSlot, parent: buddhiSlot.parentElement, activeClass: 'active-buddhi' }
-    };
-    
-    const item = slotMap[layer];
-    if (!item) return;
-
-    item.slot.textContent = content;
-    item.slot.className = "slot-content";
-    item.parent.classList.add(item.activeClass);
-
-    // Scroll slot view
-    item.slot.scrollTop = item.slot.scrollHeight;
-
-    // Specific logic updates for Chitta database node connections
-    if (layer === 'chitta') {
-        parseAndRenderGraph(content);
-    }
-
-    // Specific logic updates for Buddhi resolutions (print final replies to chat)
-    if (layer === 'buddhi') {
-        appendChatBubble('agent', content);
-    }
-}
-
-// Parse Chitta GraphRAG context strings and render node networks
-function parseAndRenderGraph(chittaContext) {
-    const nodes = [];
-    const edges = [];
-    
-    // Regular Expression helpers for node and edge matching
-    const nodeRegex = /Concept\s+Node\s+\[([^\]]+)\]:\s+"([^"]+)"\s+\(Similarity:\s+([0-9.]+),\s+Recorded\s+Arousal:\s+([0-9.]+)\)/gi;
-    const edgeRegex = /Pathway:\s+\[([^\]]+)\]\s+--\(Weight:\s+([0-9.]+)\)(?:\s+Context:\s+'([^']+)')?-->\s+\[([^\]]+)\]/gi;
-    
-    let match;
-    const seenNodes = new Set();
-    
-    // Extract memory nodes
-    while ((match = nodeRegex.exec(chittaContext)) !== null) {
-        const id = match[1];
-        const text = match[2];
-        const similarity = parseFloat(match[3]);
-        const arousal = parseFloat(match[4]);
-        seenNodes.add(id);
-
-        // Adjust color dynamically based on similarity score (glowing emerald)
-        const greenIntensity = Math.floor(similarity * 155) + 100;
-        const colorVal = `rgb(16, ${greenIntensity}, 129)`;
-        
-        nodes.push({
-            id: id,
-            label: id,
-            title: `Content: ${text.substring(0, 150)}...\nSimilarity: ${similarity}\nArousal: ${arousal}`,
-            color: {
-                background: '#090d16',
-                border: colorVal,
-                highlight: { background: '#090d16', border: '#06b6d4' }
-            },
-            borderWidth: 2,
-            size: 10 + (similarity * 15)
-        });
-    }
-
-    // Extract paths
-    while ((match = edgeRegex.exec(chittaContext)) !== null) {
-        const source = match[1];
-        const weight = parseFloat(match[2]);
-        const context = match[3] || 'relation';
-        const target = match[4];
-
-        edges.push({
-            from: source,
-            to: target,
-            value: weight,
-            title: `Context: ${context}\nWeight: ${weight}`,
-            arrows: 'to'
-        });
-    }
-
-    // Fallback node to keep network initialized
-    if (nodes.length === 0) {
-        return;
-    }
-
-    // Refresh Dataset model
-    nodesDataset.clear();
-    edgesDataset.clear();
-    
-    nodesDataset.add(nodes);
-    edgesDataset.add(edges);
-    
-    // Stabilize visual canvas layout
-    if (network) {
-        network.fit();
-    }
-}
-
-// Display search operations inside the journal
-function handleCuriositySearch(data) {
-    const { query, results } = data;
-    appendLedgerLog('search', `Curiosity search run: "${query}"`);
-    
-    const logDiv = document.createElement('div');
-    logDiv.className = 'system-message search-alert';
-    logDiv.innerHTML = `<span style="color:#10b981;font-weight:600;">Jijnasa Curiosity Search:</span> "${query}"`;
-    chatMessages.appendChild(logDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-// Print container logging outputs to console panel
-function handleSandboxExecution(data) {
-    const { code, output } = data;
-    sandboxConsole.innerHTML = `
-        <span class="console-prompt">BUDDHI Code Directive:</span>
-        <pre><code class="language-python">${escapeHtml(code)}</code></pre>
-        <span class="console-prompt">Karmendriya Container Output:</span>
-        <div class="console-output">${escapeHtml(output)}</div>
-    `;
-    sandboxConsole.scrollTop = sandboxConsole.scrollHeight;
-    appendLedgerLog('novelty', 'Karmendriya Docker sandbox execution completed.');
-}
-
-// Render Nidra transitions
-function handleNidraStatus(phase, data) {
-    if (phase === 'sleep') {
-        appendLedgerLog('novelty', 'Fatigue threshold met. Suspended runtime loops to enter Nidra Sleep.');
-        stateBadge.textContent = 'Nidra (Sleeping)';
-        stateBadge.className = 'state-badge badge-sleeping';
-        
-        // Add full sleep screen block overlay
-        const sleepMessage = document.createElement('div');
-        sleepMessage.className = 'system-message sleep-mode-active';
-        sleepMessage.innerHTML = `<span style="color:#fbbf24;font-weight:800;">[NIDRA MODE]</span> Sleep-tuning LoRA adapters active...`;
-        chatMessages.appendChild(sleepMessage);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    } else {
-        appendLedgerLog('system', 'Waking from Nidra. Dynamic Adapters compiled.');
-        if (data && data.state) {
-            updateMetacognition(data.state);
+        for (var item of ROLES) {
+          var choice = $("model-" + item.id).value;
+          if (choice !== modelName((state.roles || {})[item.id])) await api("/api/model/select", { role: item.id, model: choice });
         }
-    }
-}
-
-// Helper: Append styled chat bubbles
-function appendChatBubble(sender, text) {
-    const bubble = document.createElement('div');
-    bubble.className = `chat-bubble ${sender}`;
-    
-    // Simple parser to extract code blocks inside chat outputs
-    if (text.includes('```')) {
-        bubble.innerHTML = parseMarkdownCode(text);
-    } else {
-        bubble.textContent = text;
-    }
-    
-    chatMessages.appendChild(bubble);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-// Helper: Append entries to the Sakshi Ledger panel
-function appendLedgerLog(category, text) {
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${category}`;
-    const time = new Date().toLocaleTimeString();
-    entry.textContent = `[${time}] ${text}`;
-    ledgerLogs.appendChild(entry);
-    
-    // Tail scroll limit
-    while (ledgerLogs.children.length > 80) {
-        ledgerLogs.removeChild(ledgerLogs.firstChild);
-    }
-    ledgerLogs.scrollTop = ledgerLogs.scrollHeight;
-}
-
-// Form event submissions
-chatForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    if (shutdownRequested) {
-        appendLedgerLog('system', 'Input is disabled while shutdown is in progress.');
-        return;
-    }
-
-    const prompt = chatInput.value.trim();
-    if (!prompt) return;
-
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-            type: 'user_input',
-            data: prompt
-        }));
-        chatInput.value = '';
-    } else {
-        appendLedgerLog('failover', 'Cannot send prompt: WebSocket disconnected.');
-    }
-});
-
-if (modelApplyBtn) {
-    modelApplyBtn.addEventListener('click', () => {
-        applySelectedModel();
+        await refresh(); $("models-dialog").close(); announce("Faculty models updated.");
+      } catch (error) { $("models-status").textContent = error.message; await refresh().catch(function () {}); }
+      finally { $("save-models").disabled = !models.length; }
     });
-}
-
-if (runtimeStopBtn) {
-    runtimeStopBtn.addEventListener('click', () => {
-        requestRuntimeStop();
+    document.querySelectorAll(".modal-close").forEach(function (button) { button.addEventListener("click", function () { button.closest("dialog").close(); }); });
+    document.querySelectorAll("dialog").forEach(function (dialog) { dialog.addEventListener("click", function (event) { if (event.target === dialog) { var bounds = dialog.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close(); } }); });
+    document.querySelectorAll("[data-panel]").forEach(function (button) {
+      if (button.tagName !== "BUTTON") return;
+      button.addEventListener("click", function () {
+        document.querySelector(".observatory").dataset.panel = button.dataset.panel;
+        document.querySelectorAll(".mobile-tabs button").forEach(function (tab) { tab.setAttribute("aria-pressed", String(tab === button)); });
+      });
     });
-}
-
-// HTML escaping helper
-function escapeHtml(text) {
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
-// Clean markdown parser helper
-function parseMarkdownCode(text) {
-    const codeRegex = /```(python|javascript|bash|json)?\s*([\s\S]*?)\s*```/g;
-    return text.replace(codeRegex, (match, lang, code) => {
-        return `<pre><code class="language-${lang || 'txt'}">${escapeHtml(code)}</code></pre>`;
-    });
-}
-
-// Boot UI
-initNetwork();
-loadModelInventory();
-connectWebSocket();
+    $("dismiss-alert").addEventListener("click", function () { $("alert-banner").hidden = true; });
+    $("new-messages").addEventListener("click", function () { $("conversation").scrollTop = $("conversation").scrollHeight; $("new-messages").hidden = true; });
+    $("conversation").addEventListener("scroll", function () { var conversation = $("conversation"); if (conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 110) $("new-messages").hidden = true; });
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) { refresh().catch(function () {}); loadMemories(); } });
+    window.addEventListener("beforeunload", function () { stopped = true; clearTimeout(reconnectTimer); if (socket) socket.close(); });
+  }
+  createFaculties(); bindControls();
+  refresh().catch(function (error) { announce(error.message, true); });
+  loadMemories(); connect();
+})(typeof globalThis !== "undefined" ? globalThis : this);
