@@ -18,6 +18,9 @@ def test_cold_start_has_complete_settings_without_creating_files(isolated_root):
     result = config.load_config()
     assert result["backend"] == "ollama"
     assert result["max_rounds"] == 2
+    assert result["max_output_tokens"] == 1600
+    assert result["request_timeout"] == 180
+    assert result["cycle_timeout"] == 600
     assert set(result["roles"]) == {"manas", "chitta", "ahamkara", "buddhi"}
     assert result["background_enabled"] is False
     assert result["self_model"]["name"] == "AI-AM"
@@ -103,3 +106,13 @@ def test_corruption_never_overwrites_config(isolated_root):
 def test_missing_explicit_file_is_an_error(isolated_root):
     with pytest.raises(config.ConfigurationError, match="does not exist"):
         config.load_config(isolated_root / "missing.json")
+
+def test_explicit_generation_budgets_override_live_defaults(isolated_root):
+    path = write_settings(isolated_root, {
+        "schema_version": 2, "max_output_tokens": 2048,
+        "request_timeout": 240, "cycle_timeout": 720,
+    })
+    result = config.load_config(path)
+    assert result["max_output_tokens"] == 2048
+    assert result["request_timeout"] == 240
+    assert result["cycle_timeout"] == 720

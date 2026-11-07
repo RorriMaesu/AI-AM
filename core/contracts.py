@@ -1,6 +1,6 @@
 """Bounded, inspectable contracts for the four cognitive functions."""
 from typing import Annotated, Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 ROLES = ("manas", "chitta", "ahamkara", "buddhi")
 Text = Annotated[str, StringConstraints(strict=True, max_length=2000)]
@@ -46,13 +46,23 @@ class GoalProposal(Contract):
 class BuddhiResult(Contract):
     action: Literal["reply", "retrieve", "reconsider", "calculate"] = "reply"
     reply: Annotated[str, StringConstraints(strict=True, max_length=6000)] = ""
-    query: Text = ""
-    expression: Annotated[str, StringConstraints(strict=True, max_length=200)] = ""
+    query: Text = Field(default="", description="Required nonempty search or reconsideration question for retrieve/reconsider.")
+    expression: Annotated[str, StringConstraints(strict=True, max_length=200)] = Field(default="", description="Required for calculate: put the arithmetic expression here, for example 17*23, not in query.")
     evidence_ids: IdList = Field(default_factory=list)
     uncertainty: UnitFloat = 0.5
     rationale: Text = ""
     memory_updates: Annotated[list[MemoryProposal], Field(max_length=8)] = Field(default_factory=list)
     goal_updates: Annotated[list[GoalProposal], Field(max_length=8)] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def action_has_payload(self):
+        if self.action == "reply" and not self.reply.strip():
+            raise ValueError("action=reply requires nonempty reply")
+        if self.action == "calculate" and not self.expression.strip():
+            raise ValueError("action=calculate requires the arithmetic in expression, for example expression='17*23'")
+        if self.action in ("retrieve", "reconsider") and not self.query.strip():
+            raise ValueError("action=retrieve/reconsider requires a nonempty query")
+        return self
 
 ROLE_SCHEMAS = {
     "manas": ManasResult,
@@ -104,7 +114,8 @@ Review the original event, raw retrieved memories, and all function outputs dire
 Use evidence_ids drawn only from supplied event or memory IDs. Return action=reply with
 a useful outward reply when ready. Use retrieve with a specific query or reconsider when
 a specific ambiguity needs another round; the runtime limits these rounds. Use calculate
-only for a bounded arithmetic expression; do not claim a result until its tool outcome
+only for a bounded arithmetic expression placed in the expression field (for example
+expression="17*23"). Do not put a calculation in query. Do not claim a result until its tool outcome
 is in the workspace. Never emit code as a tool request.
 Memory proposals must cite real source_event_ids. user_statement and observation are
 reserved for exact complete text from cited user or tool events; generated summaries and

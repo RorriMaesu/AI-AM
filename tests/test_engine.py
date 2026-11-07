@@ -101,6 +101,61 @@ def test_correction_supersedes_evidence(parts):
     assert prior["id"] not in [m["id"] for m in store.retrieve("notebook")]
     assert store.get_memory(prior["id"]) is not None
 
+@pytest.mark.parametrize("proposed_content", [
+    "The user's notebook is green.",
+    "Correction: my notebook is green, not blue.",
+])
+def test_raw_user_correction_uses_current_quote_without_duplicate_capture(parts, proposed_content):
+    config, store = parts
+    old_event = store.append_event("user", "My notebook is blue.", source="user")
+    old_memory = store.add_memory(old_event["content"], "user_statement", "user", [old_event["id"]], 1.0)
+    current_quote = "Correction: my notebook is green, not blue."
+    def corrected(payload):
+        return decision(reply="I recorded the correction.",
+                        evidence_ids=[old_memory["id"], payload["current_event"]["id"]],
+                        memory_updates=[{"content": proposed_content, "kind": "user_statement",
+                                         "source_event_ids": [old_event["id"], payload["current_event"]["id"]],
+                                         "confidence": .6, "supersedes": old_memory["id"]}])
+    engine, event = run_event(config, store, ScriptBackend([corrected]), current_quote)
+    assert store.get_event(event["id"])["status"] == "complete"
+    assert engine.state["state_version"] == store.load_state()["state_version"] == 1
+    records = store.list_memories()
+    assert len(records) == 2
+    replacement = next(m for m in records if m["id"] != old_memory["id"])
+    assert replacement["content"] == current_quote
+    assert replacement["kind"] == "user_statement"
+    assert replacement["source"] == "user"
+    assert replacement["source_event_ids"] == [event["id"]]
+    assert replacement["confidence"] == 1.0
+    assert replacement["supersedes"] == old_memory["id"]
+    previous = store.get_memory(old_memory["id"])
+    assert previous["content"] == old_event["content"]
+    assert previous["source_event_ids"] == [old_event["id"]]
+    assert previous["superseded_by"] == replacement["id"]
+    assert store.get_event(old_event["id"])["content"] == old_event["content"]
+    assert [m["id"] for m in store.retrieve("notebook")] == [replacement["id"]]
+    assistants = [e for e in store.list_events() if e["kind"] == "assistant"]
+    assert len(assistants) == 1
+    assert assistants[0]["metadata"]["memory_ids"] == [replacement["id"]]
+
+@pytest.mark.parametrize("invalid_case", ["unknown_target", "reflection"])
+def test_canonical_user_correction_preserves_target_and_foreground_guards(parts, invalid_case):
+    config, store = parts
+    old_event = store.append_event("user", "My notebook is blue.", source="user")
+    old_memory = store.add_memory(old_event["content"], "user_statement", "user", [old_event["id"]], 1.0)
+    def unsupported(payload):
+        return decision(memory_updates=[{
+            "content": "The user's notebook is green.", "kind": "user_statement",
+            "source_event_ids": [payload["current_event"]["id"]], "confidence": .9,
+            "supersedes": "unknown-memory" if invalid_case == "unknown_target" else old_memory["id"],
+        }])
+    _, event = run_event(config, store, ScriptBackend([unsupported]), "Reconsider my blue notebook.",
+                         kind="reflection" if invalid_case == "reflection" else "user")
+    assert store.get_event(event["id"])["status"] == "failed"
+    assert store.get_memory(old_memory["id"])["superseded_by"] is None
+    assert store.stats()["memories"] == 1
+    assert not [e for e in store.list_events() if e["kind"] == "assistant"]
+
 def test_failure_retains_retryable_input(parts):
     config, store = parts
     engine, event = run_event(config, store, ScriptBackend(fail=True))
@@ -385,7 +440,7 @@ def test_generated_paraphrase_is_not_a_raw_statement(parts):
     assert any(m["content"] == "The notebook is definitely red." and m["kind"] == "inference" for m in records)
     assert store.get_event(event["id"])["status"] == "complete"
 
-@pytest.mark.parametrize("old_sources,replacement_kind", [(True, "user_statement"), (False, "inference"), (False, "commitment")])
+@pytest.mark.parametrize("old_sources,replacement_kind", [(True, "user_statement"), (False, "inference"), (False, "reflection"), (False, "commitment")])
 def test_correction_cannot_replace_raw_evidence_with_an_inference(parts, old_sources, replacement_kind):
     config, store = parts
     old = store.append_event("user", "My notebook is blue.", source="user")

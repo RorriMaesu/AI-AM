@@ -123,9 +123,9 @@ The important options are:
 | `api_url` | Local Ollama native chat endpoint, normally `http://127.0.0.1:11434/api/chat`. |
 | `roles` | Model and temperature settings for each of the four functions. |
 | `num_ctx` | Context budget; defaults to 8192. |
-| `max_output_tokens` | Bound for each role's generated output; defaults to 600. |
+| `max_output_tokens` | Bound for each role's generated output, including model thinking tokens; defaults to 1600. |
 | `max_rounds` | Bound on recurrence before the cycle must finish. |
-| `request_timeout` / `cycle_timeout` | Limits for inference and a complete cycle. |
+| `request_timeout` / `cycle_timeout` | Per-request and whole-cycle time limits in seconds; defaults to 180 / 600. |
 | `background_enabled` | Optional background reflection; disabled initially. |
 | `background_interval` | Minimum interval between background work opportunities. |
 
@@ -140,9 +140,20 @@ and fonts do not depend on a CDN.
 A large context and several resident models increase memory demand.
 Measure latency and VRAM before increasing parallelism or model count.
 Thinking-capable models use their Ollama default thinking mode; AI-AM consumes
-their structured final content. Models that spend the output budget thinking
-may need a larger `max_output_tokens` and cycle timeout. This remains a live
-model compatibility check, not something the scripted demo can establish.
+their structured final content. Thinking and the final JSON share the generated
+token allowance, so an undersized allowance can leave an incomplete response.
+The 1600-token default gives these roles more room than the original 600-token
+setting, which exhausted its budget during live Gemma testing.
+
+Cold model loading also counts toward the request timeout. The 180-second
+request and 600-second cycle defaults allow more startup time than the original
+60-second request limit. These are upper limits, not predicted response times:
+one normal turn makes four sequential model calls, and a second deliberation
+round can make eight, with additional calls if schema repair is needed.
+The first turn can take longer while Ollama loads the model. Model size,
+hardware, prompt length, and thinking behavior all affect latency. Test memory
+recall, correction, and calculations with the selected model; the scripted demo
+cannot establish live reasoning quality.
 
 ## Memory and correction
 

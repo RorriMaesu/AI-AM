@@ -43,6 +43,58 @@ def _context_payload(payload, num_ctx):
         raise InferenceError("Cognitive context budget exceeded. Shorten the input or increase num_ctx in settings.")
     return serialized
 
+
+def _episode_schema(role, schema, payload):
+    """Constrain record choices to the actual evidence in this handoff."""
+    result = copy.deepcopy(schema)
+    memories = payload.get("memories") or []
+    history = payload.get("history") or []
+    workspace = payload.get("workspace") or {}
+    memory_ids = {m["id"] for m in memories if isinstance(m, dict) and isinstance(m.get("id"), str)}
+    event_ids = {e["id"] for e in history if isinstance(e, dict) and isinstance(e.get("id"), str)}
+    current = payload.get("current_event") or {}
+    if isinstance(current.get("id"), str):
+        event_ids.add(current["id"])
+    for memory in memories:
+        if isinstance(memory, dict):
+            event_ids.update(i for i in memory.get("source_event_ids", []) if isinstance(i, str))
+    for tool in workspace.get("tool_results", []):
+        if isinstance(tool, dict) and isinstance(tool.get("event_id"), str):
+            event_ids.add(tool["event_id"])
+
+    def restrict(field, values):
+        if values:
+            field["items"]["enum"] = sorted(values)
+        else:
+            field["maxItems"] = 0
+
+    if role == "chitta":
+        restrict(result["properties"]["selected_memory_ids"], memory_ids)
+    elif role == "buddhi":
+        restrict(result["properties"]["evidence_ids"], memory_ids | event_ids)
+        proposal = result["$defs"]["MemoryProposal"]["properties"]
+        restrict(proposal["source_event_ids"], event_ids)
+        if memory_ids:
+            for choice in proposal["supersedes"]["anyOf"]:
+                if choice.get("type") == "string":
+                    choice["enum"] = sorted(memory_ids)
+        else:
+            proposal["supersedes"] = {"type": "null", "default": None}
+    return result, memory_ids, event_ids
+
+
+def _validate_episode_ids(role, result, memory_ids, event_ids):
+    if role == "chitta" and not set(result.selected_memory_ids).issubset(memory_ids):
+        raise ValueError("selected_memory_ids must use only the supplied retrieved memory IDs")
+    if role == "buddhi":
+        if not set(result.evidence_ids).issubset(memory_ids | event_ids):
+            raise ValueError("evidence_ids must use only the supplied event or memory IDs")
+        for proposal in result.memory_updates:
+            if not proposal.source_event_ids or not set(proposal.source_event_ids).issubset(event_ids):
+                raise ValueError("memory_updates.source_event_ids must cite supplied source events")
+            if proposal.supersedes and proposal.supersedes not in memory_ids:
+                raise ValueError("memory_updates.supersedes must identify a retrieved memory")
+
 class InferenceError(RuntimeError):
     """A model call failed; callers must preserve the pending interaction."""
 
@@ -54,7 +106,7 @@ class OllamaBackend:
         self.base_url = urlunsplit((parts.scheme, parts.netloc, "", "", ""))
         self._owned_client = client is None
         self.client = client or httpx.AsyncClient(
-            timeout=httpx.Timeout(config.get("request_timeout", 60)),
+            timeout=httpx.Timeout(config.get("request_timeout", 180)),
             follow_redirects=False,
             trust_env=False,
             limits=httpx.Limits(max_connections=4, max_keepalive_connections=2),
@@ -64,7 +116,7 @@ class OllamaBackend:
         try:
             async with self.client.stream(
                 method, url, json=payload,
-                timeout=self.config.get("request_timeout", 60),
+                timeout=self.config.get("request_timeout", 180),
                 follow_redirects=False,
             ) as response:
                 if response.status_code >= 300:
@@ -81,6 +133,8 @@ class OllamaBackend:
                 if not isinstance(data, dict):
                     raise InferenceError("Local Ollama returned an unexpected response shape.")
                 return data
+        except httpx.TimeoutException as exc:
+            raise InferenceError("Local Ollama exceeded the request time limit while loading or generating. Increase request_timeout if needed; the input remains retryable.") from exc
         except httpx.HTTPError as exc:
             raise InferenceError("Cannot reach local Ollama. Check that Ollama is running and the model is installed.") from exc
 
@@ -90,7 +144,7 @@ class OllamaBackend:
         schema = ROLE_SCHEMAS[role]
         model = validate_model_name(self.config["roles"][role]["model"])
         serialized = _context_payload(payload, self.config.get("num_ctx", 8192))
-        output_schema = schema.model_json_schema()
+        output_schema, memory_ids, event_ids = _episode_schema(role, schema.model_json_schema(), payload)
         # The format parameter constrains decoding. The prompt also needs to
         # communicate the fields and their meaning to the model.
         system_prompt = ROLE_PROMPTS[role] + "\nOutput JSON schema:\n" + json.dumps(output_schema, separators=(",", ":"))
@@ -103,7 +157,7 @@ class OllamaBackend:
             # A conservative character estimate, including schema and repair
             # context, with space reserved for output and chat framing.
             budget = min(MAX_PAYLOAD_CHARS, max(0, (
-                self.config.get("num_ctx", 8192) - self.config.get("max_output_tokens", 600) - 256
+                self.config.get("num_ctx", 8192) - self.config.get("max_output_tokens", 1600) - 256
             ) * 3))
             if sum(len(message["content"]) for message in messages) > budget:
                 raise InferenceError("Complete cognitive context budget exceeded, including schema or repair. Increase num_ctx or shorten the input.")
@@ -120,7 +174,7 @@ class OllamaBackend:
                 "options": {
                     "temperature": self.config["roles"][role]["temperature"],
                     "num_ctx": self.config.get("num_ctx", 8192),
-                    "num_predict": self.config.get("max_output_tokens", 600),
+                    "num_predict": self.config.get("max_output_tokens", 1600),
                 },
                 "keep_alive": "5m",
             }
@@ -134,16 +188,26 @@ class OllamaBackend:
             try:
                 parsed = json.loads(content)
                 result = schema.model_validate(parsed)
+                _validate_episode_ids(role, result, memory_ids, event_ids)
                 return result.model_dump(), token_count
-            except (json.JSONDecodeError, ValidationError, TypeError):
+            except (ValueError, TypeError) as exc:
                 if attempt:
+                    if data.get("done_reason") == "length":
+                        raise InferenceError(f"{role.title()} exhausted max_output_tokens before returning valid JSON. Increase that budget for this model.")
                     raise InferenceError(f"{role.title()} returned invalid structured output after one repair attempt.")
+                problem = str(exc)[:1200] if not isinstance(exc, json.JSONDecodeError) else "The response was not valid JSON."
+                if isinstance(exc, ValidationError):
+                    problem = "; ".join(
+                        ".".join(str(part) for part in item["loc"]) + ": " + item["msg"]
+                        for item in exc.errors(include_input=False, include_url=False)[:4]
+                    )[:1200]
                 # The previous output remains assistant data; the only new instruction is a schema repair.
                 messages = messages + [
                     {"role": "assistant", "content": content[:8192]},
                     {"role": "user", "content": (
-                        "Your last output did not satisfy the supplied JSON schema. "
-                        "Return one complete JSON object using exactly the schema fields and types. "
+                        "Your last output did not satisfy the supplied contract. "
+                        + "Validation problem: " + problem + "\n"
+                        + "Return one complete JSON object using exactly the schema fields and types. "
                         "Do not use markdown fences, unknown fields, or invented evidence IDs."
                     )},
                 ]

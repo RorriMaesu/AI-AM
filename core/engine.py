@@ -459,9 +459,7 @@ class MindEngine:
             raise ValueError("No decision was produced.")
         # Stored facts keep their provenance. Model inference cannot masquerade as direct observation.
         updates = []
-        if event["kind"] == "user":
-            updates.append({"content": event["content"], "kind": "user_statement", "source": "user",
-                            "source_event_ids": [event["id"]], "confidence": 1.0, "supersedes": None})
+        captured_by_correction = False
         for proposal in final["memory_updates"]:
             sources = proposal["source_event_ids"]
             if not sources or not set(sources).issubset(known_event_ids):
@@ -469,7 +467,26 @@ class MindEngine:
             source_events = [self.store.get_event(i) for i in sources]
             if any(e is None for e in source_events):
                 raise ValueError("A memory source no longer exists.")
+            supersedes = proposal.get("supersedes")
+            if supersedes and supersedes not in known_memory_ids:
+                raise ValueError("A correction must identify a memory that was retrieved.")
+            if supersedes and event["kind"] != "user":
+                raise ValueError("Background reflection cannot supersede established memories.")
+            if supersedes and event["id"] not in sources:
+                raise ValueError("A correction requires evidence from the current user turn.")
             kind = proposal["kind"]
+            source = "buddhi"
+            if (supersedes and kind == "user_statement"
+                    and known_memories[supersedes]["kind"] == "user_statement"):
+                # The model identifies what is corrected; the immutable user
+                # event supplies the replacement. Never store its paraphrase as
+                # a raw quote, or duplicate the automatic capture of this turn.
+                proposal = {**proposal, "content": event["content"],
+                            "source_event_ids": [event["id"]], "confidence": 1.0}
+                sources = proposal["source_event_ids"]
+                source_events = [event]
+                source = "user"
+                captured_by_correction = True
             if event["kind"] == "reflection" and kind in ("user_statement", "observation", "commitment"):
                 kind = "reflection"
             if kind == "observation" and any(e["kind"] != "tool" for e in source_events):
@@ -482,20 +499,16 @@ class MindEngine:
                     # A source ID proves attribution, not the faithfulness of a
                     # paraphrase. Preserve generated summaries as inferences.
                     kind = "inference"
-            supersedes = proposal.get("supersedes")
-            if supersedes and supersedes not in known_memory_ids:
-                raise ValueError("A correction must identify a memory that was retrieved.")
-            if supersedes and event["kind"] != "user":
-                raise ValueError("Background reflection cannot supersede established memories.")
-            if supersedes and event["id"] not in sources:
-                raise ValueError("A correction requires evidence from the current user turn.")
             if (supersedes and known_memories[supersedes]["kind"] in ("user_statement", "observation")
                     and kind not in ("user_statement", "observation")):
                 raise ValueError("An inferred revision cannot replace a recorded statement or observation.")
             # Avoid storing the automatically captured user statement twice.
             if kind == "user_statement" and proposal["content"].strip() == event["content"].strip() and not supersedes:
                 continue
-            updates.append({**proposal, "kind": kind, "source": "buddhi"})
+            updates.append({**proposal, "kind": kind, "source": source})
+        if event["kind"] == "user" and not captured_by_correction:
+            updates.insert(0, {"content": event["content"], "kind": "user_statement", "source": "user",
+                               "source_event_ids": [event["id"]], "confidence": 1.0, "supersedes": None})
         goals = copy.deepcopy(self.state.get("goals", []))
         for change in final["goal_updates"]:
             existing = next((g for g in goals if g["description"].casefold() == change["description"].casefold()), None)

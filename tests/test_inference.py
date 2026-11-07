@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 from pydantic import ValidationError
-from core.contracts import ROLE_SCHEMAS, ManasResult, MemoryProposal
+from core.contracts import ROLE_SCHEMAS, ManasResult, MemoryProposal, BuddhiResult
 from core.inference import DemoBackend, InferenceError, OllamaBackend
 
 def settings():
@@ -249,3 +249,99 @@ def test_remote_alias_change_is_checked_between_calls():
     asyncio.run(run())
     assert inventory_count == 2
     assert generations == 1
+
+@pytest.mark.parametrize("output", [
+    {"action": "reply", "reply": "   "},
+    {"action": "calculate", "query": "17*23"},
+    {"action": "retrieve"},
+    {"action": "reconsider", "query": "  "},
+])
+def test_decision_requires_payload_for_selected_action(output):
+    with pytest.raises(ValidationError):
+        BuddhiResult.model_validate(output)
+
+def test_calculator_missing_expression_is_repaired_before_dispatch():
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content))
+        content = {"action": "calculate", "query": "17*23"} if len(calls) == 1 else {"action": "calculate", "expression": "17*23"}
+        return httpx.Response(200, json={"message": {"content": json.dumps(content)}})
+    async def run():
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
+            result, _ = await OllamaBackend(settings(), client).infer("buddhi", {})
+            assert result["expression"] == "17*23"
+    asyncio.run(run())
+    assert len(calls) == 2
+    assert "requires the arithmetic in expression" in calls[1]["messages"][-1]["content"]
+
+def test_output_limit_failure_has_actionable_error():
+    def handler(request):
+        return httpx.Response(200, json={"message": {"content": '{"action":'}, "done_reason": "length"})
+    async def run():
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
+            with pytest.raises(InferenceError, match="exhausted max_output_tokens"):
+                await OllamaBackend(settings(), client).infer("buddhi", {})
+    asyncio.run(run())
+
+def test_loading_timeout_is_not_reported_as_unreachable_server():
+    def handler(request):
+        raise httpx.ReadTimeout("still loading", request=request)
+    async def run():
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
+            with pytest.raises(InferenceError, match="loading or generating"):
+                await OllamaBackend(settings(), client).infer("manas", {})
+    asyncio.run(run())
+
+def test_chitta_repairs_invented_id_using_episode_enum():
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content))
+        chosen = "invented" if len(calls) == 1 else "memory-actual"
+        return httpx.Response(200, json={"message": {"content": json.dumps({"selected_memory_ids": [chosen]})}})
+    async def run():
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
+            result, _ = await OllamaBackend(settings(), client).infer("chitta", {
+                "memories": [{"id": "memory-actual", "source_event_ids": ["source-actual"]}]})
+            assert result["selected_memory_ids"] == ["memory-actual"]
+    asyncio.run(run())
+    assert len(calls) == 2
+    assert calls[0]["format"]["properties"]["selected_memory_ids"]["items"]["enum"] == ["memory-actual"]
+    assert "retrieved memory IDs" in calls[1]["messages"][-1]["content"]
+
+def test_no_retrieved_memory_requires_empty_selection():
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": '{"selected_memory_ids":[]}'}})
+    async def run():
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
+            await OllamaBackend(settings(), client).infer("chitta", {"memories": []})
+    asyncio.run(run())
+    assert calls[0]["format"]["properties"]["selected_memory_ids"]["maxItems"] == 0
+
+def test_buddhi_schema_distinguishes_memory_ids_and_event_sources():
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": '{"reply":"Known.","evidence_ids":["m1"]}'}})
+    async def run():
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
+            await OllamaBackend(settings(), client).infer("buddhi", {
+                "current_event": {"id": "current"}, "history": [{"id": "past"}],
+                "memories": [{"id": "m1", "source_event_ids": ["source"]}],
+                "workspace": {"tool_results": [{"event_id": "tool"}]}})
+    asyncio.run(run())
+    schema = calls[0]["format"]
+    assert set(schema["properties"]["evidence_ids"]["items"]["enum"]) == {"m1","current","past","source","tool"}
+    proposal = schema["$defs"]["MemoryProposal"]["properties"]
+    assert set(proposal["source_event_ids"]["items"]["enum"]) == {"current","past","source","tool"}
+    assert any(choice.get("enum") == ["m1"] for choice in proposal["supersedes"]["anyOf"])
+
+def test_unrepaired_fabricated_evidence_is_not_accepted():
+    def handler(request):
+        return httpx.Response(200, json={"message": {"content": '{"reply":"Claim.","evidence_ids":["fake"]}'}})
+    async def run():
+        async with httpx.AsyncClient(transport=model_transport(handler)) as client:
+            with pytest.raises(InferenceError, match="one repair attempt"):
+                await OllamaBackend(settings(), client).infer("buddhi", {"current_event": {"id": "real"}})
+    asyncio.run(run())
