@@ -27,7 +27,7 @@ jobs:
           $preview = Join-Path $env:RUNNER_TEMP 'ai-am-bedrock-preview'
           .\prepare_bedrock.ps1 -DataDir $preview -Plan
           if (Test-Path -LiteralPath $preview) { throw 'The preview wrote files.' }
-      - name: Stage verified jars and smoke-test the proxy listeners
+      - name: Stage verified jars and test NetherNet signaling
         run: |
           $dataDir = Join-Path $env:RUNNER_TEMP 'ai-am-bedrock-proxy'
           .\prepare_bedrock.ps1 -DataDir $dataDir
@@ -49,24 +49,28 @@ jobs:
           $argsLine = "-Djava.net.preferIPv4Stack=true -Djava.io.tmpdir=$tempDir -Duser.home=$dataDir -DgeyserUdpAddress=$address -DgeyserAdvertiseAddresses=$address -Xms128M -Xmx768M -jar ViaProxy-3.4.14.jar config viaproxy.yml"
           $proc = Start-Process -FilePath $java -ArgumentList $argsLine -WorkingDirectory $dataDir -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
           try {
-              $deadline = (Get-Date).AddSeconds(90)
+              $deadline = (Get-Date).AddSeconds(60)
               do {
                   if ($proc.HasExited) { throw "Proxy exited with code $($proc.ExitCode)." }
                   $javaPort = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 25568 -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue
                   $signal = Get-NetTCPConnection -LocalAddress $address -LocalPort 19132 -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue
-                  $transport = Get-NetUDPEndpoint -LocalAddress $address -LocalPort 19132 -OwningProcess $proc.Id -ErrorAction SilentlyContinue
-                  if ($javaPort -and $signal -and $transport) { break }
+                  if ($javaPort -and $signal) { break }
                   Start-Sleep -Seconds 1
               } while ((Get-Date) -lt $deadline)
-              if (!$javaPort -or !$signal -or !$transport) {
+              if (!$javaPort -or !$signal) {
                   Write-Host "Expected Bedrock address $address. Proxy PID $($proc.Id)."
                   Get-NetTCPConnection -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue |
                       Format-Table LocalAddress,LocalPort,OwningProcess
-                  Get-NetUDPEndpoint -OwningProcess $proc.Id -ErrorAction SilentlyContinue |
-                      Format-Table LocalAddress,LocalPort,OwningProcess
                   throw 'The expected proxy listeners did not start.'
               }
-              Write-Host 'ViaProxy is listening on loopback. Geyser NetherNet opened TCP and UDP on the private runner address.'
+              # NetherNet creates the gameplay peer on a client offer. Its
+              # unauthenticated MOTD endpoint exercises signaling without one.
+              $reply = Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 -Uri ('http://{0}:19132/v1/join' -f $address)
+              if ($reply.StatusCode -ne 200 -or $reply.Headers['Content-Type'] -notmatch 'application/json') {
+                  throw 'NetherNet signaling did not return a JSON status response.'
+              }
+              $null = $reply.Content | ConvertFrom-Json
+              Write-Host 'ViaProxy listened on loopback and NetherNet answered an HTTP status request.'
           } finally {
               if (!$proc.HasExited) { Stop-Process -InputObject $proc }
               Get-Content -LiteralPath $out,$err -TotalCount 65
