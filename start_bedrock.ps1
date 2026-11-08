@@ -126,7 +126,12 @@ function Assert-OwnedRule([string]$Name,[string]$Protocol,$Remote) {
     $rules = @(Get-NetFirewallRule -PolicyStore ActiveStore -Name $Name -ErrorAction Stop)
     if ($rules.Count -ne 1) { throw "Cannot verify effective rule $Name." }
     $r = $rules[0]
-    if ([string]$r.Enabled -ne 'True' -or [string]$r.Direction -ne 'Inbound' -or [string]$r.Action -ne 'Block' -or [string]$r.Profile -ne 'Any' -or [string]$r.PrimaryStatus -ne 'OK' -or [string]$r.EnforcementStatus -ne 'Full') { throw "Firewall rule is not fully effective: $Name (status $($r.PrimaryStatus), enforcement $($r.EnforcementStatus), profile $($r.Profile))." }
+    $enforcement = @($r.EnforcementStatus | ForEach-Object { [string]$_ })
+    # Rules covering all profiles can report both an enforced active profile
+    # and inactive profiles. Require positive enforcement and no other flags.
+    $isEnforced = ($enforcement -contains 'Full' -or $enforcement -contains 'Enforced') -and
+        -not @($enforcement | Where-Object { $_ -notin @('Full','Enforced','ProfileInactive','InactiveProfile') }).Count
+    if ([string]$r.Enabled -ne 'True' -or [string]$r.Direction -ne 'Inbound' -or [string]$r.Action -ne 'Block' -or [string]$r.Profile -ne 'Any' -or [string]$r.PrimaryStatus -ne 'OK' -or -not $isEnforced) { throw "Firewall rule is not fully effective: $Name (status $($r.PrimaryStatus), enforcement $($r.EnforcementStatus), profile $($r.Profile))." }
     $p = $r | Get-NetFirewallPortFilter -ErrorAction Stop
     $a = $r | Get-NetFirewallAddressFilter -ErrorAction Stop
     $app = $r | Get-NetFirewallApplicationFilter -ErrorAction Stop
