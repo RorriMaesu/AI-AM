@@ -1,0 +1,56 @@
+name: Bedrock protected listener
+
+on:
+  pull_request:
+    paths:
+      - start_bedrock.ps1
+      - prepare_bedrock.ps1
+      - .github/workflows/bedrock-start.yml
+
+permissions:
+  contents: read
+
+jobs:
+  protected-listener:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify the guarded listener and cleanup on a disposable Windows runner
+        run: |
+          $javaDir = Join-Path $env:RUNNER_TEMP 'ai-am-bedrock-java21'
+          Copy-Item -LiteralPath $env:JAVA_HOME -Destination $javaDir -Recurse
+          $javaExe = Join-Path $javaDir 'bin\java.exe'
+          $dataDir = Join-Path $env:RUNNER_TEMP 'ai-am-protected-bedrock'
+          .\prepare_bedrock.ps1 -DataDir $dataDir -JavaExe $javaExe
+
+          $nic = Get-NetIPAddress -AddressFamily IPv4 |
+              Where-Object { $_.IPAddress -match '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' -and $_.AddressState -eq 'Preferred' } |
+              Select-Object -First 1
+          if (!$nic) { throw 'No private IPv4 address is available on this runner.' }
+          $address = $nic.IPAddress
+
+          # Supply a TCP-only fixture for the backend preflight. The test exercises
+          # the guard and signaling, with no game-world or Bedrock player login.
+          $backend = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 25565)
+          $backend.Start()
+          try {
+              .\start_bedrock.ps1 -DataDir $dataDir -Address $address -Plan
+              if (Get-NetFirewallRule -Name 'AIAM-Bedrock-*' -ErrorAction SilentlyContinue) {
+                  throw 'Preview created a firewall rule.'
+              }
+              .\start_bedrock.ps1 -DataDir $dataDir -Address $address -StartLocal -NetherNetDebug -DurationSeconds 30
+              if (Get-NetFirewallRule -Name 'AIAM-Bedrock-*' -ErrorAction SilentlyContinue) {
+                  throw 'Temporary firewall rules remained after the bounded test.'
+              }
+              $tcp = Get-NetTCPConnection -State Listen -LocalPort 19132,25568 -ErrorAction SilentlyContinue
+              $udp = Get-NetUDPEndpoint -LocalPort 19132 -ErrorAction SilentlyContinue
+              if ($tcp -or $udp) { throw 'A test listener remained after shutdown.' }
+          } finally { $backend.Stop() }

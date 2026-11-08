@@ -370,6 +370,21 @@ class OllamaBackend:
         except httpx.HTTPError as exc:
             raise InferenceError("Cannot reach local Ollama. Check that Ollama is running and the model is installed.") from exc
 
+    def _role_prompt(self, role, supplied):
+        prompt = ROLE_PROMPTS[role]
+        if role == "buddhi" and not _environment_allowed(supplied):
+            begin = prompt.find("Use action=environment only")
+            finish = prompt.find("commitment_updates require", begin)
+            if begin >= 0 and finish >= 0:
+                prompt = prompt[:begin] + "Environment actions are not authorized in this conversation.\n" + prompt[finish:]
+        return prompt
+
+    def _episode_schema(self, role, schema, payload):
+        return _episode_schema(role, schema, payload)
+
+    def _validate_episode_ids(self, role, result, memory_ids, event_ids, payload):
+        _validate_episode_ids(role, result, memory_ids, event_ids, payload)
+
     async def infer(self, role, payload):
         if role not in ROLE_SCHEMAS:
             raise ValueError("Unknown cognitive role.")
@@ -386,14 +401,9 @@ class OllamaBackend:
                     raise
                 continue
             supplied = json.loads(serialized)
-            output_schema, memory_ids, event_ids = _episode_schema(role, schema.model_json_schema(), supplied)
+            output_schema, memory_ids, event_ids = self._episode_schema(role, schema.model_json_schema(), supplied)
             # Refit after each reduction: source enums themselves consume context.
-            prompt = ROLE_PROMPTS[role]
-            if role == "buddhi" and not _environment_allowed(supplied):
-                begin = prompt.find("Use action=environment only")
-                finish = prompt.find("commitment_updates require", begin)
-                if begin >= 0 and finish >= 0:
-                    prompt = prompt[:begin] + "Environment actions are not authorized in this conversation.\n" + prompt[finish:]
+            prompt = self._role_prompt(role, supplied)
             system_prompt = prompt + "\nOutput JSON schema:\n" + json.dumps(output_schema, separators=(",", ":"))
             if len(system_prompt) + len(serialized) <= total_budget:
                 break
@@ -439,7 +449,7 @@ class OllamaBackend:
             try:
                 parsed = json.loads(content)
                 result = schema.model_validate(parsed)
-                _validate_episode_ids(role, result, memory_ids, event_ids, supplied)
+                self._validate_episode_ids(role, result, memory_ids, event_ids, supplied)
                 return result.model_dump(), token_count
             except (ValueError, TypeError) as exc:
                 if attempt:

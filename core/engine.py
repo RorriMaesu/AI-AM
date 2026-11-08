@@ -66,6 +66,11 @@ class RuntimeLease:
                 self.handle = None
 
 class MindEngine:
+    environment_tool = "simulator"
+    environment_label = "Simulation"
+    environment_result_statuses = {"succeeded"}
+    experiment_no_action_status = "completed"
+
     def __init__(self, config, store, backend=None):
         self.config = copy.deepcopy(config)
         self.store = store
@@ -355,7 +360,7 @@ class MindEngine:
     def _public_actions(self, event=None, limit=20):
         records = []
         for action in self.store.list_actions(limit=100):
-            if action["tool"] not in {"calculator", "simulator"}:
+            if action["tool"] not in {"calculator", self.environment_tool}:
                 continue
             # An actual past action remains reportable even if its conversation
             # later failed. Future queued instructions are never action evidence.
@@ -619,11 +624,12 @@ class MindEngine:
             return
         record = self.store.get_event(event["id"])
         executed = [a for a in self.store.list_actions(limit=100)
-                    if a["episode_id"] == event["id"] and a["tool"] == "simulator" and a["status"] == "succeeded"]
+                    if a["episode_id"] == event["id"] and a["tool"] == self.environment_tool
+                    and a["status"] in self.environment_result_statuses]
         if record["status"] != "complete":
             run.update(active=False, status="failed")
         elif not executed:
-            run.update(active=False, status="completed")
+            run.update(active=False, status=self.experiment_no_action_status)
         elif self._experiment_stop_requested:
             run.update(active=False, status="paused")
         elif run["active"] and run["remaining_steps"] > 0:
@@ -679,7 +685,7 @@ class MindEngine:
                      and not e.get("metadata", {}).get("evaluator_only")]
         conversational = [e for e in completed if e["kind"] in ("user", "assistant")][-6:]
         tools = [e for e in completed if e["kind"] == "tool"
-                 and e["source"] in {"calculator", "simulator"}][-4:]
+                 and e["source"] in {"calculator", self.environment_tool}][-4:]
         history = [{"id": e["id"], "kind": e["kind"], "source": e["source"], "content": e["content"][:1000]}
                    for e in sorted(conversational + tools, key=lambda e: e["created_at"])]
         ledger = self._public_actions(event=event, limit=6)
@@ -812,12 +818,24 @@ class MindEngine:
             except Exception:
                 LOG.exception("Cycle committed; observatory can recover from its next snapshot")
 
+    def _is_observation_source(self, event):
+        return event["kind"] == "tool"
+
+    async def _execute_environment_decision(self, event, decision):
+        return self._environment_action(
+            event, decision["environment_action"], decision.get("target", ""),
+            decision.get("prediction", ""), decision.get("prediction_confidence", .5))
+
+    def _attention_goals(self, event):
+        goals = copy.deepcopy(self.state.get("goals", []))
+        if event["kind"] == "experiment":
+            goals.append({"description": event["content"], "status": "active"})
+        return goals
+
     async def _cognitive_cycle(self, event, trace, started):
         capacity = self.config.get("workspace_capacity", 6)
         workspace = initialize_workspace(self.state.get("workspace"), capacity=capacity)
-        workspace["active_goals"] = copy.deepcopy(self.state.get("goals", []))
-        if event["kind"] == "experiment":
-            workspace["active_goals"].append({"description": event["content"], "status": "active"})
+        workspace["active_goals"] = self._attention_goals(event)
         # Retained attention is a retrieval cue; underlying records are fetched
         # again and checked so corrections cannot leave stale evidence in focus.
         stale = set()
@@ -925,12 +943,10 @@ class MindEngine:
             elif action == "environment":
                 if not payload["rules"]["environment_enabled"]:
                     raise ValueError("Simulation actions require an explicit bounded simulation run.")
-                tool_event, record = self._environment_action(
-                    event, decision["environment_action"], decision.get("target", ""),
-                    decision.get("prediction", ""), decision.get("prediction_confidence", .5))
+                tool_event, record = await self._execute_environment_decision(event, decision)
                 outcome = record["result"]
                 workspace["tool_results"].append({"event_id": tool_event["id"], "action_id": record["id"],
-                                                   "tool": "simulator", "result": outcome})
+                                                   "tool": self.environment_tool, "result": outcome})
                 known_event_ids.add(tool_event["id"])
                 observed = {"observations": [tool_event["content"][:1600]], "interpretations": [],
                             "uncertainties": [], "retrieval_query": event["content"], "salience": .9}
@@ -939,7 +955,7 @@ class MindEngine:
                 # revise perception/plans. One action per event keeps budget,
                 # cancellation and action attribution explicit.
                 final = {**decision, "action": "reply",
-                         "reply": "Simulation " + outcome["action"] + ": " + outcome["reason"],
+                         "reply": f'{self.environment_label} {outcome["action"]}: {outcome["reason"]}',
                          "evidence_ids": [tool_event["id"]], "memory_updates": [], "goal_updates": [],
                          "commitment_updates": []}
                 break
@@ -984,7 +1000,7 @@ class MindEngine:
                 captured_by_correction = True
             if event["kind"] == "reflection" and kind in ("user_statement", "observation", "commitment"):
                 kind = "reflection"
-            if kind == "observation" and any(e["kind"] != "tool" for e in source_events):
+            if kind == "observation" and any(not self._is_observation_source(e) for e in source_events):
                 raise ValueError("An observation requires an actual tool outcome.")
             if kind == "user_statement" and any(e["kind"] != "user" for e in source_events):
                 raise ValueError("A user statement requires a user event.")
@@ -1005,10 +1021,10 @@ class MindEngine:
             updates.insert(0, {"content": event["content"], "kind": "user_statement", "source": "user",
                                "source_event_ids": [event["id"]], "confidence": 1.0, "supersedes": None})
         for outcome in workspace.get("tool_results", []):
-            if outcome.get("tool") == "simulator":
+            if outcome.get("tool") == self.environment_tool:
                 source_event = self.store.get_event(outcome["event_id"])
                 updates.append({"content": source_event["content"], "kind": "observation",
-                                "source": "simulator", "source_event_ids": [source_event["id"]],
+                                "source": self.environment_tool, "source_event_ids": [source_event["id"]],
                                 "confidence": 1.0, "supersedes": None})
         goals = copy.deepcopy(self.state.get("goals", []))
         for change in final["goal_updates"]:
