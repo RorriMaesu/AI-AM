@@ -99,4 +99,14 @@ From a non-C checkout, preview and stage the bridge in a new directory.
 
 Preparation checks the upstream SHA-256 digests, writes the proxy configuration, and records the exact paths in `prepared-bedrock.json`. The bridge is staged for review. Its Bedrock listener is configured for loopback at this point.
 
-Before running it on a Windows PC, choose a compatible Bedrock release and configure a dedicated, access-restricted local listener. Current Bedrock uses NetherNet, which requires a non-loopback bind address with Geyser. Plan TCP and UDP access together and keep the Java backend loopback-only. Microsoft's same-machine Bedrock guidance also describes the Windows app loopback exception. Verify the actual listener, firewall policy, and Bedrock join before relying on this setup. [Geyser version support](https://geysermc.org/wiki/geyser/supported-versions/) · [Geyser networking options](https://geysermc.org/wiki/geyser/geyser-command-line-arguments-and-system-properties/) · [Minecraft for Windows loopback guidance](https://learn.microsoft.com/en-us/minecraft/creator/documents/bedrockserver/getting-started?view=minecraft-bedrock-stable#enable-loopback)
+### Try a bounded Windows Bedrock join
+
+Keep the Java server console open. In a separate PowerShell, preview with the private IPv4 address assigned to the Windows adapter you intend to use. Prefer an existing host-only or virtual adapter. Replace the example address with yours.
+
+```powershell
+.\start_bedrock.ps1 -DataDir T:\AIAM-Fishbowl\bedrock-proxy -Address 172.31.128.1 -Plan
+```
+
+Run the same command in an Administrator PowerShell with `-StartLocal` in place of `-Plan`. It checks two temporary inbound firewall rules before starting the proxy on TCP and UDP port 19132. The rules block source addresses other than the selected IPv4 address. When `AIAM_BEDROCK_READY` appears, use that address and port in Minecraft for Windows. The launcher stops the proxy and removes its rules after five minutes or when you press Ctrl+C. Logs are in the printed session directory on the data drive.
+
+The readiness marker checks NetherNet signaling. Confirm that Minecraft for Windows actually loads the world and that the Java console records the join. Check the Geyser version matrix if the client reports a protocol mismatch. [Geyser version support](https://geysermc.org/wiki/geyser/supported-versions/) · [Geyser networking options](https://geysermc.org/wiki/geyser/geyser-command-line-arguments-and-system-properties/)
