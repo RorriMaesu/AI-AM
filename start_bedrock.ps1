@@ -66,13 +66,18 @@ function Remote-Complement([string]$HostAddress) {
         $network = ($n -bxor $bit) -band $mask
         $result += "$(Number-IPv4 $network)/$prefix"
     }
-    return @($result + '::/0')
+    return @($result + '::/1' + '8000::/1')
 }
 function Canonical-Addresses($Values) {
     $result = foreach ($value in @($Values)) {
         $s = ([string]$value).Trim().ToLowerInvariant()
-        if ($s -eq '::/0' -or $s -eq '0:0:0:0:0:0:0:0/0') { '::/0'; continue }
         $parts = $s.Split('/')
+        if ($parts[0].Contains(':')) {
+            $address = [Net.IPAddress]::Parse($parts[0]).ToString()
+            if ($parts.Count -ne 2 -or $parts[1] -ne '1' -or $address -notin @('::','8000::')) { throw "Unexpected firewall address: $s" }
+            "$address/1"
+            continue
+        }
         $n = IPv4-Number $parts[0]
         $prefix = 32
         if ($parts.Count -eq 2) {
@@ -121,7 +126,7 @@ function Assert-OwnedRule([string]$Name,[string]$Protocol,$Remote) {
     $rules = @(Get-NetFirewallRule -PolicyStore ActiveStore -Name $Name -ErrorAction Stop)
     if ($rules.Count -ne 1) { throw "Cannot verify effective rule $Name." }
     $r = $rules[0]
-    if ([string]$r.Enabled -ne 'True' -or [string]$r.Direction -ne 'Inbound' -or [string]$r.Action -ne 'Block' -or [string]$r.Profile -ne 'Any' -or [string]$r.PrimaryStatus -ne 'OK' -or [string]$r.EnforcementStatus -ne 'Full') { throw "Firewall rule is not fully effective: $Name" }
+    if ([string]$r.Enabled -ne 'True' -or [string]$r.Direction -ne 'Inbound' -or [string]$r.Action -ne 'Block' -or [string]$r.Profile -ne 'Any' -or [string]$r.PrimaryStatus -ne 'OK' -or [string]$r.EnforcementStatus -ne 'Full') { throw "Firewall rule is not fully effective: $Name (status $($r.PrimaryStatus), enforcement $($r.EnforcementStatus), profile $($r.Profile))." }
     $p = $r | Get-NetFirewallPortFilter -ErrorAction Stop
     $a = $r | Get-NetFirewallAddressFilter -ErrorAction Stop
     $app = $r | Get-NetFirewallApplicationFilter -ErrorAction Stop
