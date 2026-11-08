@@ -46,7 +46,7 @@ jobs:
               if (Get-NetFirewallRule -Name 'AIAM-Bedrock-*' -ErrorAction SilentlyContinue) {
                   throw 'Preview created a firewall rule.'
               }
-              .\start_bedrock.ps1 -DataDir $dataDir -Address $address -StartLocal -DurationSeconds 30
+              .\start_bedrock.ps1 -DataDir $dataDir -Address $address -StartLocal -NetherNetDebug -DurationSeconds 30
               if (Get-NetFirewallRule -Name 'AIAM-Bedrock-*' -ErrorAction SilentlyContinue) {
                   throw 'Temporary firewall rules remained after the bounded test.'
               }

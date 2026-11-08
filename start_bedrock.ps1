@@ -7,6 +7,7 @@ param(
     [string]$Address = '',
     [switch]$Plan,
     [switch]$StartLocal,
+    [switch]$NetherNetDebug,
     [ValidateRange(30,300)][int]$DurationSeconds = 300,
     [ValidateRange(10,120)][int]$StartupTimeoutSeconds = 60
 )
@@ -180,6 +181,7 @@ if (-not $StartLocal) {
     [ordered]@{
         mode='plan'; data_dir=$root; java_exe=$java; address=$Address; available_addresses=$choices;
         duration_seconds=$DurationSeconds; startup_timeout_seconds=$StartupTimeoutSeconds;
+        nethernet_debug=[bool]$NetherNetDebug;
         requires_admin_for_start=$true; block_remote_addresses=$remote;
         services_started=$false; firewall_rules_created=$false
     } | ConvertTo-Json -Depth 5
@@ -223,8 +225,9 @@ try {
     }
     $arguments = @("-Djava.io.tmpdir=$temp", "-Duser.home=$homeDir", '-Djava.net.preferIPv4Stack=true',
         "-DgeyserUdpAddress=$Address", "-DgeyserAdvertiseAddresses=$Address", '-DgeyserUdpPort=19132',
-        '-DgeyserTransport=nethernet', '-DgeyserSignalingMode=builtin', '-DgeyserStunDiscovery=false',
-        '-Xms128M', '-Xmx768M', '-jar', $jar, 'config', $activeConfig)
+        '-DgeyserTransport=nethernet', '-DgeyserSignalingMode=builtin', '-DgeyserStunDiscovery=false')
+    if ($NetherNetDebug) { $arguments += '-DgeyserNetherNetLogLevel=DEBUG' }
+    $arguments += @('-Xms128M', '-Xmx768M', '-jar', $jar, 'config', $activeConfig)
     $startParameters = @{
         FilePath=$java; ArgumentList=(($arguments | ForEach-Object { Quote-Native $_ }) -join ' ');
         WorkingDirectory=$root; WindowStyle='Hidden'; PassThru=$true;
